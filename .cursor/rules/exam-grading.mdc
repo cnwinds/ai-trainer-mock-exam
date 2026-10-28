@@ -1,0 +1,31 @@
+---
+description: 人工智能训练师刷题系统的评卷与按短板出题流程（用户说“评卷”“出题”“分析短板”时使用）
+alwaysApply: true
+---
+
+# 刷题系统评卷协议
+
+系统位于 `exam-app/`（启动：根目录 `启动刷题系统.bat`，地址 http://127.0.0.1:8848/）。用户备考“人工智能训练师二级（技师）”，A 理论 / B 实操 / C 综合评审。
+
+## 用户说“评卷”时
+1. 列出 `exam-app/submissions/*.json`，找出在 `exam-app/feedback/` 中没有同名文件的答卷。
+2. 逐份阅读：`subjective[]` 是主观题（qid、stem、answer、autoScore 关键词预估、rubricHits），`wrong[]` 是客观题错题，`kpSummary` 是知识点得分。题目全文、rubric/checklist、参考答案在 `exam-app/data/bank/*.json`（按 qid 查），2025 真题参考答案在 `备考输出/02~09`。
+3. 按评委标准给每道主观题打分（对照 rubric/checklist 的得分点，看结构、要点覆盖、量化指标、是否满足题面硬性要求），评语要具体指出：得分点、缺漏点、一句可直接誊抄的改进写法。
+4. 写入 `exam-app/feedback/<同名>.json`，格式：
+```json
+{
+  "submission_id": "exam-xxx",
+  "graded_at": "2026-10-28T15:00",
+  "total": 72, "max": 100,
+  "summary": "Markdown：总体评价 + 主要短板",
+  "items": [{"qid": "Y25-Q03", "score": 7, "max": 10, "autoScore": 6, "comment": "Markdown 评语"}],
+  "weak_kps": ["ml", "pm"],
+  "next_actions": ["明天先做 ml 专项 20 题", "..."]
+}
+```
+   `total` 对模拟卷 = 客观题得分 objScore + 主观题 AI 评分之和；`items[].autoScore` 照抄答卷中的预估分（页面靠它修正掌握度）。
+5. 读取 `exam-app/data/progress.json`（`kp` 为各知识点 seen/score，`wrong` 为错题本），结合本次结果总结短板。
+6. 针对最弱的 1–3 个知识点新编 10–20 道题，写入 `exam-app/data/bank/ai_round<N>_<日期>.json`（格式与 `new_*.json` 一致，id 用 `AI<N>-<kp>-<序号>`，src 填 "AI追加"），再运行 `python exam-app/tools/validate.py` 确认 0 错误。页面刷新后自动加载，弱项强化会优先抽到。
+7. 在聊天中用中文简要汇报：各份得分、主要问题、新增题目数量与针对的知识点、下一步练习建议。
+
+知识点代码：ethics law office security bpm product pm training ml dl algo data llm aisys。

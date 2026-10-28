@@ -1,0 +1,16 @@
+# 个人做题数据
+exam-app/data/progress.json
+exam-app/submissions/*
+!exam-app/submissions/.gitkeep
+exam-app/feedback/*
+!exam-app/feedback/.gitkeep
+
+# 重复打包文件
+*.zip
+
+__pycache__/
+*.pyc
+*.tmp
+.ipynb_checkpoints/
+Thumbs.db
+.DS_Store

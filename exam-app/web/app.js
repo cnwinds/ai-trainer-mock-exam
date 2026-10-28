@@ -1,0 +1,699 @@
+'use strict';
+/* ====== 常量 ====== */
+const KP = {
+  ethics: '职业道德与AI伦理', law: '法律法规与知识产权', office: '计算机与办公', security: 'AI安全与质量',
+  bpm: '业务分析与流程', product: '产品与用户增长', pm: '项目管理', training: '培训与指导',
+  ml: '机器学习', dl: '深度学习', algo: '数据结构与算法', data: '数据工程与智能训练',
+  llm: '大模型与生成式AI', aisys: '智能系统设计',
+};
+const TYPE = { judge: '判断题', single: '单选题', multi: '多选题', short: '简答题', case: '实操/综合' };
+const LETTERS = 'ABCDEFGH';
+const EXAM_CFG = {
+  standard: { name: '标准模拟卷（A 理论 · 100 分 · 90 分钟）', min: 90, parts: [['judge', 10, 1], ['single', 40, 1], ['multi', 5, 2], ['short', 4, 10]] },
+  quick: { name: '快速小卷（36 分 · 30 分钟）', min: 30, parts: [['judge', 5, 1], ['single', 15, 1], ['multi', 3, 2], ['short', 1, 10]] },
+  objective: { name: '纯客观题卷（60 分 · 45 分钟）', min: 45, parts: [['judge', 10, 1], ['single', 40, 1], ['multi', 5, 2]] },
+  shortonly: { name: '简答专练卷（40 分 · 40 分钟）', min: 40, parts: [['short', 4, 10]] },
+};
+const PLAN = [
+  '2025 真题客观题通刷一遍（真题解析页遮挡答案自测），错题进错题本',
+  '专项：职业道德 + 法律法规 + 办公 + AI 安全',
+  '专项：业务流程 + 产品增长 + 项目管理 + 培训指导',
+  '专项：机器学习 + 深度学习 + 数据结构算法',
+  '专项：数据工程 + 大模型 + 智能系统设计',
+  '简答专练卷 ×1 → 提交评卷；背 6 道真题简答骨架',
+  '第 1 次标准模拟卷（90 分钟限时）→ 提交评卷',
+  '实操：B1.1 点餐框架 + B1.2 房产挖掘（限时）',
+  '实操：B2 训练集/黄金测试集/KS（限时）',
+  '实操：B3 智慧物业全链路（35 分钟限时）',
+  '实操：B4 培训计划 + C 合同审查（限时）',
+  '第 2 次标准模拟卷 + 弱项强化 30 题',
+  '新编实操案例 ×2 + 弱项强化 + 错题清零',
+  '第 3 次标准模拟卷 + 错题本过一遍 + 速记卡（备考输出/11）',
+];
+
+/* ====== 状态 ====== */
+let BANK = [], BYID = {}, P = null, SESSION = null, TIMER = null;
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const md = s => (window.marked ? marked.parse(String(s || '')) : '<pre>' + esc(s) + '</pre>');
+const today = () => new Date().toLocaleDateString('sv-SE');
+const nowStr = () => new Date().toLocaleString('sv-SE').replace(' ', 'T');
+const fmtTime = s => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0'); };
+const toast = (t, ms = 2200) => { const el = $('#toast'); el.textContent = t; el.classList.remove('hidden'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.add('hidden'), ms); };
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+/* ====== API ====== */
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(path + ' ' + r.status);
+  return r.json();
+}
+let saveT = null;
+function saveProgress() {
+  clearTimeout(saveT);
+  saveT = setTimeout(() => {
+    localStorage.setItem('progress', JSON.stringify(P));
+    api('/api/progress', P).catch(() => { });
+  }, 400);
+}
+const docCache = {};
+async function loadDoc(name) {
+  if (!docCache[name]) docCache[name] = api('/api/doc?name=' + encodeURIComponent(name)).then(r => r.text).catch(() => '（文档读取失败：' + name + '）');
+  return docCache[name];
+}
+function docSection(text, anchor) {
+  const lines = text.split('\n');
+  const i = lines.findIndex(l => /^#{2,4}\s/.test(l) && l.includes(anchor));
+  if (i < 0) return text;
+  const lvl = lines[i].match(/^#+/)[0].length;
+  let j = i + 1;
+  while (j < lines.length && !(new RegExp('^#{1,' + lvl + '}\\s').test(lines[j]))) j++;
+  return lines.slice(i, j).join('\n');
+}
+
+/* ====== 进度与自适应 ====== */
+function initProgress(p) {
+  p = p && typeof p === 'object' ? p : {};
+  p.settings = Object.assign({ examDate: '2026-11-11', planStart: today() }, p.settings || {});
+  for (const k of ['q', 'kp', 'wrong', 'daily']) p[k] = p[k] || {};
+  p.history = p.history || [];
+  p.appliedFeedback = p.appliedFeedback || [];
+  return p;
+}
+function kpAcc(kp) { const s = P.kp[kp]; return s ? (s.score + 1) / (s.seen + 2) : 0.5; }
+function record(q, frac) {
+  const s = P.q[q.id] || (P.q[q.id] = { seen: 0, score: 0, streak: 0, wrongCount: 0 });
+  s.seen++; s.score += frac; s.last = frac; s.lastAt = nowStr();
+  if (frac >= 0.999) s.streak++; else { s.streak = 0; s.wrongCount++; }
+  const k = P.kp[q.kp] || (P.kp[q.kp] = { seen: 0, score: 0 });
+  k.seen++; k.score += frac;
+  if (q.type !== 'case') {
+    if (frac < 0.999) P.wrong[q.id] = { at: nowStr(), times: (P.wrong[q.id]?.times || 0) + 1 };
+    else if (P.wrong[q.id] && s.streak >= 2) delete P.wrong[q.id];
+  }
+  P.daily[today()] = (P.daily[today()] || 0) + 1;
+  saveProgress();
+}
+function weight(q) {
+  let w = 0.5 + 2.5 * (1 - kpAcc(q.kp));
+  const s = P.q[q.id];
+  if (!s) w *= 1.6;
+  else {
+    if (s.last < 0.999) w *= 3;
+    if (s.streak >= 2) w *= 0.25;
+  }
+  if (q.src === '2025真题') w *= 1.2;
+  return w;
+}
+function pickWeighted(pool, n, adaptive = true) {
+  return pool.map(q => ({ q, k: Math.pow(Math.random(), 1 / (adaptive ? weight(q) : 1)) }))
+    .sort((a, b) => b.k - a.k).slice(0, n).map(x => x.q);
+}
+
+/* ====== 判分 ====== */
+function gradeObjective(q, ans) {
+  ans = ans || '';
+  if (q.type === 'multi') {
+    if (ans === q.answer) return 1;
+    if (!ans) return 0;
+    for (const c of ans) if (!q.answer.includes(c)) return 0;
+    return 0.5;
+  }
+  return ans === q.answer ? 1 : 0;
+}
+function keywordScore(items, text) {
+  const t = (text || '').toLowerCase();
+  let got = 0, max = 0;
+  const detail = items.map(r => {
+    const hits = (r.keywords || []).filter(k => k && t.includes(String(k).toLowerCase()));
+    const sc = r.score || 0;
+    max += sc;
+    const g = hits.length >= 2 ? sc : hits.length === 1 ? sc * 0.6 : 0;
+    got += g;
+    return { point: r.point || r.item, score: sc, got: Math.round(g * 10) / 10, hits };
+  });
+  return { got: Math.round(got * 10) / 10, max, detail };
+}
+const ansText = (q, a) => q.type === 'judge' ? (a === 'T' ? '正确' : a === 'F' ? '错误' : '未作答') : (a || '未作答');
+
+/* ====== 路由 ====== */
+const VIEWS = {};
+function go(view, ...args) {
+  if (SESSION && SESSION.running && view !== 'exam-run' && !confirm('考试进行中，离开会保留进度（可回到"模拟考试"继续）。确定离开？')) return;
+  const tab = { 'case-run': 'cases', 'exam-run': 'exam', 'practice-run': 'practice' }[view] || view;
+  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.view === tab));
+  if (!view.startsWith('exam-run') && !view.startsWith('case-run')) stopTimer();
+  window.scrollTo(0, 0);
+  VIEWS[view](...args);
+}
+document.addEventListener('click', e => { const a = e.target.closest('#nav a'); if (a) go(a.dataset.view); });
+function openModal(html) { $('#modal-body').innerHTML = html; $('#modal').classList.remove('hidden'); }
+function closeModal() { $('#modal').classList.add('hidden'); }
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+
+function startTimer(endTs, onEnd) {
+  stopTimer();
+  const box = $('#timerbox'); box.classList.remove('hidden');
+  const tick = () => {
+    const left = (endTs - Date.now()) / 1000;
+    box.textContent = '⏱ ' + fmtTime(left);
+    box.classList.toggle('low', left < 300);
+    if (left <= 0) { stopTimer(); onEnd(); }
+  };
+  tick(); TIMER = setInterval(tick, 1000);
+}
+function stopTimer() { clearInterval(TIMER); TIMER = null; $('#timerbox').classList.add('hidden'); }
+
+/* ====== 看板 ====== */
+VIEWS.home = () => {
+  const objCount = BANK.filter(q => ['judge', 'single', 'multi'].includes(q.type)).length;
+  const shortCount = BANK.filter(q => q.type === 'short').length;
+  const caseCount = BANK.filter(q => q.type === 'case').length;
+  const seen = Object.keys(P.q).length;
+  let tot = 0, sc = 0; Object.values(P.kp).forEach(k => { tot += k.seen; sc += k.score; });
+  const acc = tot ? Math.round(sc / tot * 100) : 0;
+  const daysLeft = Math.ceil((new Date(P.settings.examDate) - new Date(today())) / 86400000);
+  const dayIdx = Math.min(13, Math.max(0, Math.floor((new Date(today()) - new Date(P.settings.planStart)) / 86400000)));
+  const kps = Object.keys(KP).map(k => ({ k, acc: kpAcc(k), seen: P.kp[k]?.seen || 0, total: BANK.filter(q => q.kp === k).length }));
+  const tried = kps.filter(x => x.seen > 0).sort((a, b) => a.acc - b.acc);
+  const weak = tried.slice(0, 3);
+  const untried = kps.filter(x => x.seen === 0 && x.total > 0);
+  const wrongN = Object.keys(P.wrong).length;
+  const color = a => a >= 0.85 ? 'var(--ok)' : a >= 0.7 ? '#65a30d' : a >= 0.55 ? 'var(--warn)' : 'var(--bad)';
+  $('#view').innerHTML = `
+  <div class="grid g4">
+    <div class="card"><div class="label">距考试</div><div class="stat">${daysLeft}<small>天</small></div>
+      <div class="label">考试日 <input type="date" id="examDate" value="${P.settings.examDate}" style="padding:2px 6px"></div></div>
+    <div class="card"><div class="label">今日已做</div><div class="stat">${P.daily[today()] || 0}<small>题</small></div><div class="label">建议每天 ≥ 80 题客观题 + 1 道主观题</div></div>
+    <div class="card"><div class="label">累计作答 / 题库覆盖</div><div class="stat">${tot}<small>次 · ${seen}/${BANK.length} 题</small></div><div class="label">总体得分率 ${acc}%</div></div>
+    <div class="card"><div class="label">错题本</div><div class="stat">${wrongN}<small>题</small></div><a onclick="go('wrong')">去清错题 →</a></div>
+  </div>
+  <div class="grid g2">
+    <div class="card">
+      <h3 style="margin-top:0">今日任务（14 天计划 · 第 ${dayIdx + 1} 天）</h3>
+      <ol class="plan">${PLAN.map((t, i) => `<li class="${i === dayIdx ? 'today' : i < dayIdx ? 'past' : ''}">D${i + 1}：${t}</li>`).join('')}</ol>
+      <div class="label">计划起始日 <input type="date" id="planStart" value="${P.settings.planStart}" style="padding:2px 6px"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">快速开始</h3>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn pri" onclick="startExam('standard')">标准模拟卷</button>
+        <button class="btn" onclick="startExam('quick')">30 分钟小卷</button>
+        <button class="btn" onclick="startWeak()">弱项强化 30 题</button>
+        <button class="btn" onclick="go('cases')">实操 B/C</button>
+      </div>
+      <h3>短板诊断</h3>
+      ${weak.length ? weak.map(w => `<div>⚠️ <b>${KP[w.k]}</b> 得分率 ${Math.round(w.acc * 100)}%（${w.seen} 次）<a onclick="startPractice(['${w.k}'])"> 专练 →</a></div>`).join('') : '<div class="label">还没有作答数据，先做一套模拟卷吧。</div>'}
+      ${untried.length ? `<div class="label" style="margin-top:8px">未练过：${untried.map(x => KP[x.k]).join('、')}</div>` : ''}
+      <h3>题库</h3>
+      <div class="label">客观题 ${objCount} · 简答 ${shortCount} · 实操/综合 ${caseCount}（2025 真题 ${BANK.filter(q => q.src === '2025真题').length} 道）</div>
+      <div class="notice" style="margin-top:10px">主观题提交后，在 Cursor 聊天中对我说 <b>“评卷”</b>，我会阅卷、写评语，并按你的短板追加新题。</div>
+    </div>
+  </div>
+  <div class="card"><h3 style="margin-top:0">知识点掌握度（越靠前越弱）</h3>
+    ${kps.sort((a, b) => (a.seen ? a.acc : 2) - (b.seen ? b.acc : 2)).map(x => `<div class="kprow"><span>${KP[x.k]}</span>
+      <div class="bar"><i style="width:${x.seen ? Math.round(x.acc * 100) : 0}%;background:${color(x.acc)}"></i></div>
+      <span class="n">${x.seen ? Math.round(x.acc * 100) + '% · ' + x.seen + '次' : '未练'} / 库 ${x.total}</span></div>`).join('')}
+  </div>`;
+  $('#examDate').onchange = e => { P.settings.examDate = e.target.value; saveProgress(); VIEWS.home(); };
+  $('#planStart').onchange = e => { P.settings.planStart = e.target.value; saveProgress(); VIEWS.home(); };
+};
+
+/* ====== 模拟考试 ====== */
+VIEWS.exam = () => {
+  const saved = JSON.parse(localStorage.getItem('session') || 'null');
+  $('#view').innerHTML = `
+  <h1>模拟考试</h1>
+  ${saved && saved.running ? `<div class="notice" style="margin-bottom:16px">有未交卷的考试：${esc(saved.title)} <button class="btn sm pri" onclick="resumeExam()">继续作答</button> <button class="btn sm" onclick="localStorage.removeItem('session');go('exam')">放弃</button></div>` : ''}
+  <div class="card">
+    <h3 style="margin-top:0">组卷设置</h3>
+    <div class="row" style="margin-bottom:12px">
+      <label>试卷类型 <select id="cfg">${Object.entries(EXAM_CFG).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('')}</select></label>
+      <label>题源 <select id="srcSel"><option value="all">全部（真题 + 新编）</option><option value="new">仅新编题</option><option value="y25">仅 2025 真题</option></select></label>
+      <label><input type="checkbox" id="adaptive" checked> 按短板加权抽题</label>
+    </div>
+    <button class="btn pri" onclick="startExam($('#cfg').value,$('#srcSel').value,$('#adaptive').checked)">生成试卷并开始计时</button>
+    <p class="label">分值按 2025 评分框架：判断 10 分 / 单选 40 分 / 多选 10 分（每题 2 分，少选得 1 分，错选 0 分）/ 简答 40 分。简答先按关键词预估分，最终以我的评卷为准。</p>
+  </div>
+  <div class="card"><h3 style="margin-top:0">历史成绩</h3>
+    ${P.history.length ? P.history.slice().reverse().slice(0, 15).map(h => `<div class="list-item"><span class="tag">${esc(h.date)}</span><span>${esc(h.title)}</span><span class="spacer"></span><b>${h.score} / ${h.max}</b><span class="label">客观题 ${h.objScore}/${h.objMax}</span></div>`).join('') : '<div class="label">暂无</div>'}
+  </div>`;
+};
+function buildPaper(cfgKey, src, adaptive) {
+  const cfg = EXAM_CFG[cfgKey];
+  const qs = [];
+  for (const [type, n, pts] of cfg.parts) {
+    let pool = BANK.filter(q => q.type === type);
+    if (src === 'new') pool = pool.filter(q => q.src !== '2025真题');
+    if (src === 'y25') pool = pool.filter(q => q.src === '2025真题');
+    pickWeighted(pool, n, adaptive).forEach(q => qs.push({ id: q.id, pts }));
+  }
+  return { id: 'exam-' + Date.now(), kind: 'exam', cfg: cfgKey, title: cfg.name, questions: qs, answers: {}, marks: {}, start: Date.now(), end: Date.now() + cfg.min * 60000, running: true };
+}
+function startExam(cfgKey, src = 'all', adaptive = true) {
+  SESSION = buildPaper(cfgKey, src, adaptive);
+  persistSession();
+  go('exam-run');
+}
+function startWeak() {
+  const objs = BANK.filter(q => ['judge', 'single', 'multi'].includes(q.type));
+  const picked = pickWeighted(objs, 30, true);
+  startPracticeList(picked, '弱项强化 30 题');
+}
+function resumeExam() { SESSION = JSON.parse(localStorage.getItem('session')); go('exam-run'); }
+function persistSession() { localStorage.setItem('session', JSON.stringify(SESSION)); }
+
+function optionHtml(q, i, state) {
+  const L = LETTERS[i];
+  return `<div class="opt ${state}" data-q="${q.id}" data-v="${L}"><b>${L}.</b><span>${esc(q.options[i])}</span></div>`;
+}
+function judgeOpts(q) { return [['T', '正确 ✓'], ['F', '错误 ✗']]; }
+
+VIEWS['exam-run'] = () => {
+  const S = SESSION;
+  const groups = {};
+  S.questions.forEach((x, i) => { const q = BYID[x.id]; if (!q) return; (groups[q.type] = groups[q.type] || []).push([x, i]); });
+  let html = `<div class="exam-wrap"><div><h1>${esc(S.title)}</h1>`;
+  for (const t of ['judge', 'single', 'multi', 'short']) {
+    if (!groups[t]) continue;
+    const pts = groups[t][0][0].pts;
+    html += `<div class="secthead">${TYPE[t]}（共 ${groups[t].length} 题，每题 ${pts} 分）</div>`;
+    for (const [x, i] of groups[t]) html += examQ(BYID[x.id], i, x.pts);
+  }
+  html += `<div class="row" style="margin:20px 0 60px"><button class="btn pri" onclick="submitExam()">交卷</button></div></div>
+  <div class="side card"><div class="label" style="margin-bottom:6px">答题卡（橙框=标记）</div><div class="navgrid" id="navgrid"></div>
+  <div style="margin-top:14px" class="label" id="progressTxt"></div>
+  <button class="btn pri" style="width:100%;margin-top:10px" onclick="submitExam()">交卷</button></div></div>`;
+  $('#view').innerHTML = html;
+  bindExamInputs();
+  refreshNav();
+  startTimer(S.end, () => { toast('时间到，自动交卷'); submitExam(true); });
+};
+function examQ(q, i, pts) {
+  const a = SESSION.answers[q.id] || '';
+  let body = '';
+  if (q.type === 'judge') body = judgeOpts(q).map(([v, t]) => `<div class="opt ${a === v ? 'sel' : ''}" data-q="${q.id}" data-v="${v}"><span>${t}</span></div>`).join('');
+  else if (q.type === 'single' || q.type === 'multi') body = q.options.map((_, k) => optionHtml(q, k, a.includes(LETTERS[k]) ? 'sel' : '')).join('');
+  else body = `<textarea data-q="${q.id}" placeholder="分点作答：先界定问题，再分层列要点，每点写“做什么 + 为什么/指标”">${esc(a)}</textarea>`;
+  return `<div class="q" id="q-${i}"><div class="qhead"><b>${i + 1}.</b><span class="tag">${TYPE[q.type]}${q.type === 'multi' ? '（多选）' : ''}</span><span class="tag">${KP[q.kp] || q.kp}</span><span>${pts} 分</span>
+    <span class="markbtn ${SESSION.marks[q.id] ? 'on' : ''}" data-mark="${q.id}">${SESSION.marks[q.id] ? '★ 已标记' : '☆ 标记'}</span></div>
+    <div class="stem">${esc(q.stem)}</div>${body}</div>`;
+}
+function bindExamInputs() {
+  $('#view').onclick = e => {
+    const m = e.target.closest('[data-mark]');
+    if (m) { const id = m.dataset.mark; SESSION.marks[id] = !SESSION.marks[id]; m.classList.toggle('on'); m.textContent = SESSION.marks[id] ? '★ 已标记' : '☆ 标记'; persistSession(); refreshNav(); return; }
+    const o = e.target.closest('.opt[data-q]');
+    if (!o || !SESSION.running) return;
+    const q = BYID[o.dataset.q], v = o.dataset.v;
+    let a = SESSION.answers[q.id] || '';
+    if (q.type === 'multi') a = a.includes(v) ? a.replace(v, '') : [...a + v].sort().join('');
+    else a = v;
+    SESSION.answers[q.id] = a;
+    o.parentElement.querySelectorAll(`.opt[data-q="${q.id}"]`).forEach(x => x.classList.toggle('sel', a.includes(x.dataset.v)));
+    persistSession(); refreshNav();
+  };
+  $('#view').oninput = e => { if (e.target.matches('textarea[data-q]')) { SESSION.answers[e.target.dataset.q] = e.target.value; persistSession(); refreshNav(); } };
+}
+function refreshNav() {
+  const g = $('#navgrid'); if (!g) return;
+  let done = 0;
+  g.innerHTML = SESSION.questions.map((x, i) => {
+    const a = SESSION.answers[x.id]; if (a) done++;
+    let cls = a ? 'done' : '';
+    if (SESSION.result) { const r = SESSION.result.items[x.id]; cls = r.frac >= 0.999 ? 'r-ok' : r.frac > 0 ? 'r-part' : 'r-bad'; }
+    if (SESSION.marks[x.id]) cls += ' mark';
+    return `<a class="${cls}" onclick="document.getElementById('q-${i}').scrollIntoView({behavior:'smooth'})">${i + 1}</a>`;
+  }).join('');
+  const pt = $('#progressTxt'); if (pt) pt.textContent = SESSION.result ? `得分 ${SESSION.result.score} / ${SESSION.result.max}` : `已答 ${done} / ${SESSION.questions.length}`;
+}
+async function submitExam(force) {
+  const S = SESSION;
+  if (!S || !S.running) return;
+  const un = S.questions.filter(x => !S.answers[x.id]).length;
+  if (!force && !confirm(un ? `还有 ${un} 题未作答，确定交卷？` : '确定交卷？')) return;
+  S.running = false; stopTimer();
+  const items = {}; let score = 0, max = 0, objScore = 0, objMax = 0;
+  const subj = [];
+  for (const x of S.questions) {
+    const q = BYID[x.id]; if (!q) continue;
+    const a = S.answers[q.id] || '';
+    let frac, extra = null;
+    if (q.type === 'short') { const k = keywordScore(q.rubric, a); frac = k.max ? k.got / k.max : 0; extra = k; subj.push({ qid: q.id, kp: q.kp, max: x.pts, stem: q.stem, answer: a, autoScore: Math.round(frac * x.pts * 10) / 10, rubricHits: k.detail }); }
+    else { frac = gradeObjective(q, a); objScore += frac * x.pts; objMax += x.pts; }
+    items[q.id] = { frac, got: Math.round(frac * x.pts * 10) / 10, pts: x.pts, extra };
+    score += frac * x.pts; max += x.pts;
+    record(q, frac);
+  }
+  score = Math.round(score * 10) / 10; objScore = Math.round(objScore * 10) / 10;
+  S.result = { items, score, max, objScore, objMax };
+  P.history.push({ date: today(), title: S.title, score, max, objScore, objMax });
+  saveProgress();
+  localStorage.removeItem('session');
+  const wrongList = S.questions.map(x => BYID[x.id]).filter(q => q && q.type !== 'short' && items[q.id].frac < 0.999)
+    .map(q => ({ qid: q.id, kp: q.kp, type: q.type, yours: S.answers[q.id] || '', answer: q.answer }));
+  const kpSum = {};
+  S.questions.forEach(x => { const q = BYID[x.id]; if (!q) return; const r = items[q.id]; const k = kpSum[q.kp] || (kpSum[q.kp] = { got: 0, max: 0 }); k.got += r.got; k.max += r.pts; });
+  S.submitted = await api('/api/submit', { id: S.id, created: nowStr(), kind: 'exam', title: S.title, autoScore: score, maxScore: max, objScore, objMax, wrong: wrongList, kpSummary: kpSum, subjective: subj, durationMin: Math.round((Date.now() - S.start) / 60000) }).then(() => true).catch(() => false);
+  renderExamResult();
+}
+async function renderExamResult() {
+  const S = SESSION, R = S.result;
+  const byType = {}; const byKp = {};
+  S.questions.forEach(x => { const q = BYID[x.id]; if (!q) return; const r = R.items[q.id];
+    const t = byType[q.type] || (byType[q.type] = { got: 0, max: 0 }); t.got += r.got; t.max += r.pts;
+    const k = byKp[q.kp] || (byKp[q.kp] = { got: 0, max: 0 }); k.got += r.got; k.max += r.pts; });
+  const hasShort = S.questions.some(x => BYID[x.id]?.type === 'short');
+  let html = `<div class="exam-wrap"><div>
+  <div class="card"><div class="row"><div><div class="label">${esc(S.title)}</div><div class="scorebig">${R.score}<small style="font-size:20px;color:var(--muted)"> / ${R.max}</small></div>
+    <div class="label">客观题 ${R.objScore} / ${R.objMax}${hasShort ? ' · 简答为关键词预估分' : ''}</div></div><span class="spacer"></span>
+    <div>${Object.entries(byType).map(([t, v]) => `<div>${TYPE[t]}：<b>${Math.round(v.got * 10) / 10}</b> / ${v.max}</div>`).join('')}</div></div>
+    ${hasShort ? `<div class="notice" style="margin-top:12px">${S.submitted ? '✅ 答卷已保存，等待 AI 评卷。' : '⚠️ 答卷保存失败（服务未启动？）'}去 Cursor 聊天里说 <b>“评卷”</b>，我会给简答逐题打分、写评语，并按短板出新题。</div>` : ''}
+  </div>
+  <div class="card"><h3 style="margin-top:0">知识点得分</h3>${Object.entries(byKp).sort((a, b) => a[1].got / a[1].max - b[1].got / b[1].max).map(([k, v]) => `<div class="kprow"><span>${KP[k] || k}</span><div class="bar"><i style="width:${v.got / v.max * 100}%;background:${v.got / v.max >= .8 ? 'var(--ok)' : v.got / v.max >= .6 ? 'var(--warn)' : 'var(--bad)'}"></i></div><span class="n">${Math.round(v.got * 10) / 10}/${v.max}</span></div>`).join('')}
+  <div class="row" style="margin-top:12px"><button class="btn pri" onclick="startWeak()">针对短板再练 30 题</button><button class="btn" onclick="go('exam')">再来一套</button></div></div>`;
+  const groups = {};
+  S.questions.forEach((x, i) => { const q = BYID[x.id]; if (q) (groups[q.type] = groups[q.type] || []).push([q, i, x.pts]); });
+  for (const t of ['judge', 'single', 'multi', 'short']) {
+    if (!groups[t]) continue;
+    html += `<div class="secthead">${TYPE[t]}</div>`;
+    for (const [q, i] of groups[t]) html += reviewQ(q, S.answers[q.id] || '', R.items[q.id], i);
+  }
+  html += `</div><div class="side card"><div class="label" style="margin-bottom:6px">绿=对 橙=部分 红=错</div><div class="navgrid" id="navgrid"></div><div class="label" id="progressTxt" style="margin-top:10px"></div></div></div>`;
+  $('#view').innerHTML = html; $('#view').onclick = null; $('#view').oninput = null;
+  refreshNav();
+  loadRefs();
+}
+function reviewQ(q, a, r, i) {
+  const head = `<div class="qhead"><b>${i + 1}.</b><span class="tag">${TYPE[q.type]}</span><span class="tag">${KP[q.kp] || q.kp}</span><span class="tag ${q.src === '2025真题' ? 'y25' : 'new'}">${q.src}</span><span>${r ? r.got + ' / ' + r.pts + ' 分' : ''}</span></div>`;
+  if (q.type === 'short') {
+    const k = r.extra;
+    return `<div class="q" id="q-${i}">${head}<div class="stem">${esc(q.stem)}</div>
+      <h3>你的作答</h3><div class="stem-pre">${esc(a) || '（未作答）'}</div>
+      ${shortFeedback(q, k)}</div>`;
+  }
+  return `<div class="q" id="q-${i}">${head}${objBody(q, a, true)}</div>`;
+}
+function objBody(q, a, showResult) {
+  let opts;
+  if (q.type === 'judge') opts = judgeOpts(q).map(([v, t]) => { let c = 'locked'; if (showResult) { if (v === q.answer) c += ' right'; else if (a === v) c += ' wrong'; } return `<div class="opt ${c}"><span>${t}</span></div>`; }).join('');
+  else opts = q.options.map((o, k) => { const L = LETTERS[k]; let c = 'locked'; if (showResult) { if (q.answer.includes(L)) c += ' right'; else if (a.includes(L)) c += ' wrong'; } return `<div class="opt ${c}"><b>${L}.</b><span>${esc(o)}</span></div>`; }).join('');
+  const f = gradeObjective(q, a);
+  const verdict = showResult ? `<div class="verdict ${f >= .999 ? 'ok' : f > 0 ? 'part' : 'bad'}">${f >= .999 ? '✓ 正确' : f > 0 ? '△ 少选（半分）' : '✗ 错误'}　你的答案：${esc(ansText(q, a))}　正确答案：${esc(ansText(q, q.answer))}</div>` : '';
+  return `<div class="stem">${esc(q.stem)}</div>${opts}${verdict}${showResult ? explainBox(q) : ''}`;
+}
+const explainBox = q => `<div class="explain"><div>${esc(q.explain)}</div><div class="think">💡 ${esc(q.thinking)}</div></div>`;
+function shortFeedback(q, k) {
+  return `<h3>关键词预估：${k ? k.got + ' / ' + k.max : '-'}</h3>
+    <table class="rubric"><tr><th>得分点</th><th>分值</th><th>命中关键词</th></tr>
+    ${(k ? k.detail : q.rubric.map(x => ({ point: x.point, score: x.score, hits: [] }))).map(d => `<tr class="${d.hits.length ? 'hit' : 'miss'}"><td>${d.hits.length ? '✓' : '✗'} ${esc(d.point)}</td><td>${k ? d.got + '/' : ''}${d.score}</td><td>${esc(d.hits.join('、')) || '—'}</td></tr>`).join('')}
+    </table>
+    <h3>答题思路</h3><div class="explain md">${md(q.thinking)}</div>
+    <h3>参考答案</h3><div class="md ref" data-qid="${q.id}">${q.reference ? md(q.reference) : '加载中…'}</div>`;
+}
+async function loadRefs() {
+  for (const el of document.querySelectorAll('.ref[data-qid]')) {
+    const q = BYID[el.dataset.qid];
+    if (q.reference || !q.referenceDoc) continue;
+    const t = await loadDoc(q.referenceDoc);
+    el.innerHTML = md(q.referenceAnchor ? docSection(t, q.referenceAnchor) : t);
+  }
+}
+
+/* ====== 专项练习（逐题即时反馈）====== */
+let PR = null;
+VIEWS.practice = () => {
+  const counts = t => Object.keys(KP).map(k => [k, BANK.filter(q => q.kp === k && t.includes(q.type)).length]);
+  $('#view').innerHTML = `<h1>专项练习</h1>
+  <div class="card">
+    <h3 style="margin-top:0">选择知识点（可多选）</h3>
+    <div class="chips" id="kpchips">${counts(['judge', 'single', 'multi', 'short']).map(([k, n]) => `<span class="chip" data-k="${k}">${KP[k]} <small>${Math.round(kpAcc(k) * 100)}% · ${n}题</small></span>`).join('')}</div>
+    <div class="row" style="margin-top:14px">
+      <label>题型 <select id="ptype"><option value="obj">客观题（判断/单选/多选）</option><option value="judge">仅判断</option><option value="single">仅单选</option><option value="multi">仅多选</option><option value="short">仅简答</option></select></label>
+      <label>题源 <select id="psrc"><option value="all">全部</option><option value="y25">2025 真题</option><option value="new">新编</option></select></label>
+      <label>数量 <input type="number" id="pn" value="20" min="1" max="200" style="width:80px"></label>
+      <button class="btn pri" onclick="practiceFromForm()">开始练习</button>
+      <button class="btn" onclick="startWeak()">让系统按短板出题</button>
+    </div>
+  </div>`;
+  $('#kpchips').onclick = e => { const c = e.target.closest('.chip'); if (c) c.classList.toggle('on'); };
+};
+function practiceFromForm() {
+  const kps = [...document.querySelectorAll('#kpchips .chip.on')].map(c => c.dataset.k);
+  const t = $('#ptype').value, src = $('#psrc').value, n = +$('#pn').value || 20;
+  startPractice(kps, t, src, n);
+}
+function startPractice(kps, t = 'obj', src = 'all', n = 20) {
+  const types = t === 'obj' ? ['judge', 'single', 'multi'] : [t];
+  let pool = BANK.filter(q => types.includes(q.type) && (!kps.length || kps.includes(q.kp)));
+  if (src === 'y25') pool = pool.filter(q => q.src === '2025真题');
+  if (src === 'new') pool = pool.filter(q => q.src !== '2025真题');
+  if (!pool.length) return toast('没有符合条件的题目');
+  startPracticeList(pickWeighted(pool, n, true), (kps.length ? kps.map(k => KP[k]).join('、') : '全部知识点') + ' · 专项');
+}
+function startPracticeList(list, title) {
+  PR = { title, list, i: 0, ans: {}, done: {}, got: 0, subj: [] };
+  go('practice-run');
+}
+VIEWS['practice-run'] = () => {
+  const q = PR.list[PR.i];
+  if (!q) return practiceSummary();
+  const done = PR.done[q.id];
+  const a = PR.ans[q.id] || '';
+  let body;
+  if (q.type === 'short') {
+    body = `<div class="stem">${esc(q.stem)}</div><textarea id="sa" ${done ? 'disabled' : ''} placeholder="分点作答">${esc(a)}</textarea>
+      ${done ? `<div id="sfb">${shortFeedback(q, done.k)}</div>` : `<div class="row" style="margin-top:10px"><button class="btn pri" onclick="practiceSubmitShort()">提交</button></div>`}`;
+  } else if (done) body = objBody(q, a, true);
+  else {
+    const opts = q.type === 'judge' ? judgeOpts(q).map(([v, t]) => `<div class="opt ${a === v ? 'sel' : ''}" data-v="${v}"><span>${t}</span></div>`).join('')
+      : q.options.map((o, k) => `<div class="opt ${a.includes(LETTERS[k]) ? 'sel' : ''}" data-v="${LETTERS[k]}"><b>${LETTERS[k]}.</b><span>${esc(o)}</span></div>`).join('');
+    body = `<div class="stem">${esc(q.stem)}</div><div id="opts">${opts}</div>
+      <div class="row" style="margin-top:10px"><button class="btn pri" onclick="practiceCheck()">${q.type === 'multi' ? '确认提交' : '提交'}</button><span class="label">${q.type === 'single' || q.type === 'judge' ? '提示：单选/判断点击选项即判分' : ''}</span></div>`;
+  }
+  $('#view').innerHTML = `<div class="row"><h1 style="margin:0">${esc(PR.title)}</h1><span class="spacer"></span><span class="label">第 ${PR.i + 1} / ${PR.list.length} 题 · 得分 ${Math.round(PR.got * 10) / 10}</span></div>
+  <div class="bar" style="margin:10px 0 16px"><i style="width:${PR.i / PR.list.length * 100}%;background:var(--pri)"></i></div>
+  <div class="q"><div class="qhead"><span class="tag">${TYPE[q.type]}${q.type === 'multi' ? '（多选）' : ''}</span><span class="tag">${KP[q.kp] || q.kp}</span><span class="tag ${q.src === '2025真题' ? 'y25' : 'new'}">${q.src}${q.no ? ' 第' + q.no + '题' : ''}</span>${P.q[q.id] ? `<span class="label">做过 ${P.q[q.id].seen} 次</span>` : ''}</div>${body}</div>
+  <div class="row">${PR.i > 0 ? '<button class="btn" onclick="PR.i--;VIEWS[\'practice-run\']()">上一题</button>' : ''}<span class="spacer"></span>
+  <button class="btn" onclick="practiceSummary()">结束练习</button>${done ? `<button class="btn pri" id="nextBtn" onclick="PR.i++;VIEWS['practice-run']()">下一题 →</button>` : ''}</div>`;
+  const box = $('#opts');
+  if (box) box.onclick = e => {
+    const o = e.target.closest('.opt'); if (!o) return;
+    let v = o.dataset.v, cur = PR.ans[q.id] || '';
+    cur = q.type === 'multi' ? (cur.includes(v) ? cur.replace(v, '') : [...cur + v].sort().join('')) : v;
+    PR.ans[q.id] = cur;
+    box.querySelectorAll('.opt').forEach(x => x.classList.toggle('sel', cur.includes(x.dataset.v)));
+    if (q.type !== 'multi') practiceCheck();
+  };
+  if (done && q.type === 'short') loadRefs();
+};
+function practiceCheck() {
+  const q = PR.list[PR.i], a = PR.ans[q.id] || '';
+  if (!a) return toast('请先作答');
+  const f = gradeObjective(q, a);
+  PR.done[q.id] = { f }; PR.got += f; record(q, f);
+  VIEWS['practice-run']();
+}
+document.addEventListener('keydown', e => {
+  if (!PR || !$('#nextBtn') || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'Enter' || e.key === 'ArrowRight') $('#nextBtn').click();
+});
+function practiceSubmitShort() {
+  const q = PR.list[PR.i], a = $('#sa').value;
+  if (!a.trim()) return toast('请先作答');
+  PR.ans[q.id] = a;
+  const k = keywordScore(q.rubric, a), f = k.max ? k.got / k.max : 0;
+  PR.done[q.id] = { f, k }; PR.got += f; record(q, f);
+  PR.subj.push({ qid: q.id, kp: q.kp, max: q.score || 10, stem: q.stem, answer: a, autoScore: Math.round(f * (q.score || 10) * 10) / 10, rubricHits: k.detail });
+  VIEWS['practice-run']();
+}
+async function practiceSummary() {
+  const n = Object.keys(PR.done).length;
+  const objDone = PR.list.filter(q => PR.done[q.id] && q.type !== 'short');
+  const right = objDone.filter(q => PR.done[q.id].f >= .999).length;
+  let saved = '';
+  if (PR.subj.length && !PR.saved) {
+    PR.saved = true;
+    const ok = await api('/api/submit', { id: 'practice-' + Date.now(), created: nowStr(), kind: 'practice', title: PR.title, autoScore: PR.subj.reduce((s, x) => s + x.autoScore, 0), maxScore: PR.subj.reduce((s, x) => s + x.max, 0), subjective: PR.subj, wrong: objDone.filter(q => PR.done[q.id].f < .999).map(q => ({ qid: q.id, kp: q.kp, yours: PR.ans[q.id], answer: q.answer })) }).then(() => true).catch(() => false);
+    saved = ok ? '<div class="notice">简答已提交，在 Cursor 聊天里说“评卷”获取 AI 评分。</div>' : '';
+  }
+  const wrongs = objDone.filter(q => PR.done[q.id].f < .999);
+  $('#view').innerHTML = `<h1>练习小结 · ${esc(PR.title)}</h1><div class="card">
+    <div class="scorebig">${right} / ${objDone.length}</div><div class="label">客观题正确数（共作答 ${n} 题）</div>${saved}
+    <div class="row" style="margin-top:12px"><button class="btn pri" onclick="startWeak()">继续弱项强化</button><button class="btn" onclick="go('practice')">换个专项</button><button class="btn" onclick="go('home')">回看板</button></div></div>
+    ${wrongs.length ? '<h2>本次错题</h2>' + wrongs.map((q, i) => `<div class="q"><div class="qhead"><span class="tag">${TYPE[q.type]}</span><span class="tag">${KP[q.kp]}</span></div>${objBody(q, PR.ans[q.id] || '', true)}</div>`).join('') : ''}`;
+}
+
+/* ====== 错题本 ====== */
+VIEWS.wrong = () => {
+  const ids = Object.keys(P.wrong).filter(id => BYID[id]).sort((a, b) => (P.wrong[b].times - P.wrong[a].times));
+  const byKp = {}; ids.forEach(id => { const k = BYID[id].kp; byKp[k] = (byKp[k] || 0) + 1; });
+  $('#view').innerHTML = `<div class="row"><h1 style="margin:0">错题本（${ids.length}）</h1><span class="spacer"></span>
+    ${ids.length ? `<button class="btn pri" onclick="startPracticeList(shuffle(Object.keys(P.wrong).filter(i=>BYID[i]).map(i=>BYID[i])),'错题重做')">全部重做</button>` : ''}</div>
+    <p class="label">规则：答错自动入本；同一题连续答对 2 次自动移出。</p>
+    <div class="chips" style="margin-bottom:14px">${Object.entries(byKp).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span class="chip" onclick="startPracticeList(Object.keys(P.wrong).filter(i=>BYID[i]&&BYID[i].kp==='${k}').map(i=>BYID[i]),'错题重做 · ${KP[k]}')">${KP[k]} ${n}</span>`).join('')}</div>
+    ${ids.map((id, i) => { const q = BYID[id]; return `<div class="q"><div class="qhead"><span class="tag">${TYPE[q.type]}</span><span class="tag">${KP[q.kp]}</span><span class="tag bad">错 ${P.wrong[id].times} 次</span><span class="label">${P.wrong[id].at.slice(0, 16).replace('T', ' ')}</span></div>
+      ${q.type === 'short' ? `<div class="stem">${esc(q.stem)}</div>` : objBody(q, '', true)}</div>`; }).join('') || '<div class="card label">暂无错题 🎉</div>'}`;
+};
+
+/* ====== 实操 B/C ====== */
+let CS = null;
+VIEWS.cases = () => {
+  const cases = BANK.filter(q => q.type === 'case');
+  const mods = ['B1.1', 'B1.2', 'B2', 'B3', 'B4', 'C'];
+  const done = id => P.q[id] ? `<span class="tag ok">练过 ${P.q[id].seen} 次 · 预估 ${Math.round(P.q[id].score / P.q[id].seen * 100)}</span>` : '';
+  $('#view').innerHTML = `<h1>实操 B / 综合评审 C</h1>
+  <div class="notice" style="margin-bottom:16px">下午场：B 120 分钟（业务分析 25 / 智能训练 30 / 系统设计 40 / 培训 5）+ C 30 分钟。限时作答 → 提交后看 checklist 自评与参考答案 → 在聊天中说“评卷”拿到评分与改进建议。建议在 Word/WPS 画流程图，这里用文字箭头写流程即可。</div>
+  ${mods.map(m => { const list = cases.filter(c => c.module === m); if (!list.length) return ''; return `<div class="card"><h3 style="margin-top:0">${m}</h3>${list.map(c => `<div class="list-item"><span class="tag ${c.src === '2025真题' ? 'y25' : 'new'}">${c.src}</span><b>${esc(c.title)}</b><span class="label">${c.minutes} 分钟</span>${done(c.id)}<span class="spacer"></span><button class="btn sm" onclick="viewCase('${c.id}')">看题与参考</button><button class="btn sm pri" onclick="startCase('${c.id}')">限时作答</button></div>`).join('')}</div>`; }).join('')}`;
+};
+function caseStemHtml(c) { return c.stemFormat === 'pre' ? `<div class="stem-pre">${esc(c.stem)}</div>` : `<div class="md stem-pre">${md(c.stem)}</div>`; }
+async function caseRefHtml(c) {
+  let ref = c.reference ? md(c.reference) : '';
+  if (c.referenceDoc) ref += md(await loadDoc(c.referenceDoc));
+  return ref;
+}
+async function viewCase(id) {
+  const c = BYID[id];
+  openModal(`<h2 style="margin-top:0">${esc(c.title)} <span class="tag">${c.module}</span></h2>${caseStemHtml(c)}
+    <h3>评分要点 checklist</h3>${checklistTable(c)}
+    ${c.thinking ? `<h3>答题思路</h3><div class="explain md">${md(c.thinking)}</div>` : ''}
+    ${c.templateDoc ? `<h3>答题卷模板</h3><div class="md" id="tplbox">加载中…</div>` : ''}
+    <h3>参考答案</h3><div class="md" id="refbox">加载中…</div>`);
+  $('#refbox').innerHTML = await caseRefHtml(c);
+  if (c.templateDoc) $('#tplbox').innerHTML = md(await loadDoc(c.templateDoc));
+}
+function checklistTable(c, k) {
+  const rows = k ? k.detail : c.checklist.map(x => ({ point: x.item, score: x.score, hits: [] }));
+  return `<table class="rubric"><tr><th>评分项</th><th>分值</th>${k ? '<th>命中关键词</th>' : ''}</tr>${rows.map(d => `<tr class="${k ? (d.hits.length ? 'hit' : 'miss') : ''}"><td>${k ? (d.hits.length ? '✓ ' : '✗ ') : ''}${esc(d.point)}</td><td>${k ? d.got + '/' : ''}${d.score}</td>${k ? `<td>${esc(d.hits.join('、')) || '—'}</td>` : ''}</tr>`).join('')}</table>`;
+}
+function startCase(id) {
+  const c = BYID[id];
+  const saved = JSON.parse(localStorage.getItem('case-' + id) || 'null');
+  CS = saved && saved.running ? saved : { id, answer: '', start: Date.now(), end: Date.now() + c.minutes * 60000, running: true };
+  go('case-run');
+}
+VIEWS['case-run'] = () => {
+  const c = BYID[CS.id];
+  $('#view').innerHTML = `<div class="row"><h1 style="margin:0">${esc(c.title)}</h1><span class="tag">${c.module} · ${c.minutes} 分钟</span><span class="spacer"></span><button class="btn" onclick="go('cases')">返回</button></div>
+  <div class="grid g2" style="margin-top:14px;align-items:start">
+    <div>${caseStemHtml(c)}</div>
+    <div><textarea class="big" id="caseAns" placeholder="按题面任务一/二/三分节作答。流程图可写成：用户下单 → NLP解析 →〈置信度≥0.9?〉是→ 后厨；否→ 人工校对 …">${esc(CS.answer)}</textarea>
+    <div class="row" style="margin-top:10px"><span class="label" id="wc"></span><span class="spacer"></span><button class="btn pri" onclick="submitCase()">交卷</button></div></div>
+  </div>`;
+  const ta = $('#caseAns');
+  const wc = () => $('#wc').textContent = ta.value.length + ' 字';
+  ta.oninput = () => { CS.answer = ta.value; localStorage.setItem('case-' + CS.id, JSON.stringify(CS)); wc(); };
+  wc();
+  startTimer(CS.end, () => { toast('时间到！可继续写完再交卷，但请记录超时'); });
+};
+async function submitCase() {
+  const c = BYID[CS.id];
+  if (!CS.answer.trim()) return toast('还没有作答');
+  if (!confirm('确定交卷？')) return;
+  stopTimer(); CS.running = false; localStorage.removeItem('case-' + CS.id);
+  const k = keywordScore(c.checklist, CS.answer);
+  const frac = k.got / k.max;
+  record(c, frac);
+  const used = Math.round((Date.now() - CS.start) / 60000);
+  const ok = await api('/api/submit', { id: 'case-' + Date.now(), created: nowStr(), kind: 'case', title: `${c.module} ${c.title}`, autoScore: k.got, maxScore: 100, durationMin: used, limitMin: c.minutes,
+    subjective: [{ qid: c.id, kp: c.kp, max: 100, stem: c.title, answer: CS.answer, autoScore: k.got, rubricHits: k.detail }] }).then(() => true).catch(() => false);
+  $('#view').innerHTML = `<h1>${esc(c.title)} · 交卷</h1>
+  <div class="card"><div class="row"><div><div class="label">关键词预估（仅供参考）</div><div class="scorebig">${k.got}<small style="font-size:20px;color:var(--muted)"> / 100</small></div><div class="label">用时 ${used} 分钟（限时 ${c.minutes}）</div></div></div>
+  <div class="notice" style="margin-top:12px">${ok ? '✅ 已提交。' : '⚠️ 提交失败。'}在 Cursor 聊天里说 <b>“评卷”</b>，我会按评分要点逐项打分并指出缺漏。</div></div>
+  <div class="card"><h3 style="margin-top:0">评分要点对照</h3>${checklistTable(c, k)}</div>
+  <div class="card"><h3 style="margin-top:0">你的作答</h3><div class="stem-pre">${esc(CS.answer)}</div></div>
+  ${c.thinking ? `<div class="card"><h3 style="margin-top:0">答题思路</h3><div class="md">${md(c.thinking)}</div></div>` : ''}
+  <div class="card"><h3 style="margin-top:0">参考答案</h3><div class="md" id="refbox">加载中…</div></div>`;
+  $('#refbox').innerHTML = await caseRefHtml(c);
+}
+
+/* ====== 2025 真题解析 ====== */
+let RV = { tab: 'judge', hide: false };
+VIEWS.review = (tab) => {
+  if (tab) RV.tab = tab;
+  const y = BANK.filter(q => q.src === '2025真题');
+  const tabs = [['judge', '判断 14'], ['single', '单选 55'], ['multi', '多选 8'], ['short', '简答 6'], ['case', '实操 B/C'], ['docs', '备考文档']];
+  let body = '';
+  if (['judge', 'single', 'multi'].includes(RV.tab)) {
+    body = y.filter(q => q.type === RV.tab).sort((a, b) => a.no - b.no).map(q => `<div class="q"><div class="qhead"><b>${q.no}.</b><span class="tag">${KP[q.kp]}</span></div>
+      ${RV.hide ? `<div class="stem">${esc(q.stem)}</div>${q.options ? q.options.map((o, k) => `<div class="opt locked"><b>${LETTERS[k]}.</b><span>${esc(o)}</span></div>`).join('') : ''}
+        <div class="blur" onclick="this.classList.remove('blur')"><div class="verdict ok">答案：${ansText(q, q.answer)}</div>${explainBox(q)}</div>`
+        : objBody(q, q.answer, true).replace(/<div class="verdict[^>]*>.*?<\/div>/, `<div class="verdict ok">答案：${ansText(q, q.answer)}</div>`)}</div>`).join('');
+  } else if (RV.tab === 'short') {
+    body = y.filter(q => q.type === 'short').sort((a, b) => a.no - b.no).map(q => `<div class="q"><div class="qhead"><b>简答 ${q.no}</b><span class="tag">${KP[q.kp]}</span><span>10 分</span></div>
+      <div class="stem">${esc(q.stem)}</div><div ${RV.hide ? 'class="blur" onclick="this.classList.remove(\'blur\')"' : ''}>${shortFeedback(q, null)}</div></div>`).join('');
+  } else if (RV.tab === 'case') {
+    body = y.filter(q => q.type === 'case').map(c => `<div class="card"><div class="row"><span class="tag y25">${c.module}</span><b>${esc(c.title)}</b><span class="label">${c.minutes} 分钟</span><span class="spacer"></span><button class="btn sm" onclick="viewCase('${c.id}')">题面 + 评分点 + 参考答案</button><button class="btn sm pri" onclick="startCase('${c.id}')">限时作答</button></div></div>`).join('');
+  } else {
+    const docs = ['01-评委拆解与学习路径.md', '02-A理论参考答案.md', '03-下午场总览-思考路径与学习方法.md', '04-B1.1参考答案与思考路径.md', '05-B1.2参考答案与思考路径.md', '06-B2参考答案与思考路径.md', '07-B3参考答案与思考路径.md', '08-B4参考答案与思考路径.md', '09-C参考答案与思考路径.md', '11-每日速记卡.md'];
+    body = `<div class="card">${docs.map(d => `<div class="list-item"><span>📄 ${d}</span><span class="spacer"></span><button class="btn sm" onclick="showDoc('${d}')">打开</button></div>`).join('')}</div>`;
+  }
+  $('#view').innerHTML = `<div class="row"><h1 style="margin:0">2025 真题解析</h1><span class="spacer"></span><label><input type="checkbox" id="hideAns" ${RV.hide ? 'checked' : ''}> 遮挡答案自测（点击模糊区显示）</label></div>
+  <p class="label">官方未公布标准答案，以下为依据法规与专业知识整理的参考答案；每题附“答题思路”（快速判断/排除方法）。</p>
+  <div class="tabs">${tabs.map(([k, t]) => `<a class="${RV.tab === k ? 'on' : ''}" onclick="VIEWS.review('${k}')">${t}</a>`).join('')}
+  <span class="spacer"></span>${['judge', 'single', 'multi'].includes(RV.tab) ? `<button class="btn sm pri" onclick="startPracticeList(BANK.filter(q=>q.src==='2025真题'&&q.type==='${RV.tab}').sort((a,b)=>a.no-b.no),'2025真题 · ${TYPE[RV.tab]}顺序练')">按顺序刷这一类</button>` : ''}</div>${body}`;
+  $('#hideAns').onchange = e => { RV.hide = e.target.checked; VIEWS.review(); };
+  if (RV.tab === 'short') loadRefs();
+};
+async function showDoc(name) { openModal(`<h2 style="margin-top:0">${esc(name)}</h2><div class="md">加载中…</div>`); $('#modal-body .md').innerHTML = md(await loadDoc(name)); }
+
+/* ====== 评卷记录 ====== */
+VIEWS.grading = async () => {
+  $('#view').innerHTML = '<h1>评卷记录</h1><div class="card label">加载中…</div>';
+  let list = [];
+  try { list = await api('/api/submissions'); } catch { }
+  applyFeedback(list);
+  const pending = list.filter(s => !s.feedback && (s.kind === 'case' || s.kind === 'exam' || s.kind === 'practice'));
+  $('#view').innerHTML = `<h1>评卷记录</h1>
+  <div class="notice" style="margin-bottom:16px">待评 ${pending.length} 份。在 Cursor 聊天里对我说 <b>“评卷”</b>，我会读取这些答卷，写入评分与评语；刷新本页即可看到，并会同步修正你的知识点掌握度。</div>
+  <div class="card">${list.length ? list.map(s => `<div class="list-item"><span class="tag">${esc((s.created || '').slice(0, 16).replace('T', ' '))}</span><span class="tag">${{ exam: '模拟卷', case: '实操', practice: '练习' }[s.kind] || s.kind}</span>
+    <span>${esc(s.title)}</span><span class="spacer"></span><span class="label">预估 ${s.autoScore ?? '-'} / ${s.maxScore ?? '-'}</span>
+    ${s.feedback ? `<span class="tag ok">AI 评分 ${s.feedback.total ?? '-'} / ${s.feedback.max ?? s.maxScore ?? '-'}</span>` : '<span class="tag warn">待评卷</span>'}
+    <button class="btn sm" onclick="showSubmission('${s.id}')">查看</button></div>`).join('') : '<div class="label">暂无提交</div>'}</div>`;
+};
+function applyFeedback(list) {
+  let changed = false;
+  for (const s of list) {
+    if (!s.feedback || P.appliedFeedback.includes(s.id)) continue;
+    for (const it of s.feedback.items || []) {
+      const q = BYID[it.qid]; if (!q || !it.max) continue;
+      const ai = it.score / it.max, auto = (it.autoScore ?? null);
+      const k = P.kp[q.kp] || (P.kp[q.kp] = { seen: 0, score: 0 });
+      const qs = P.q[q.id];
+      if (auto !== null && qs) { const delta = ai - auto / it.max; k.score += delta; qs.score += delta; qs.last = ai; }
+      else { k.seen++; k.score += ai; }
+    }
+    P.appliedFeedback.push(s.id); changed = true;
+  }
+  if (changed) { saveProgress(); toast('已同步 AI 评卷结果到掌握度'); }
+}
+async function showSubmission(id) {
+  const { submission: s, feedback: f } = await api('/api/submission/' + id);
+  const fbItem = qid => (f?.items || []).find(x => x.qid === qid);
+  openModal(`<h2 style="margin-top:0">${esc(s.title)}</h2><div class="label">${esc(s.created)} · 预估 ${s.autoScore} / ${s.maxScore}${s.durationMin != null ? ' · 用时 ' + s.durationMin + ' 分钟' : ''}</div>
+    ${f ? `<div class="card" style="margin-top:12px;background:#f8fafc"><h3 style="margin-top:0">AI 评卷：${f.total ?? '-'} / ${f.max ?? s.maxScore}</h3><div class="md">${md(f.summary || '')}</div>
+      ${f.next_actions ? `<h3>下一步</h3><div class="md">${md((f.next_actions || []).map(x => '- ' + x).join('\n'))}</div>` : ''}</div>` : '<div class="notice" style="margin-top:12px">尚未评卷</div>'}
+    ${(s.subjective || []).map(it => { const fi = fbItem(it.qid); const q = BYID[it.qid]; return `<div class="q"><div class="qhead"><span class="tag">${q ? TYPE[q.type] : ''}</span><span class="tag">${KP[it.kp] || it.kp}</span><span>预估 ${it.autoScore}/${it.max}</span>${fi ? `<span class="tag ok">AI ${fi.score}/${fi.max}</span>` : ''}</div>
+      <div class="stem">${esc(it.stem)}</div><h3>作答</h3><div class="stem-pre">${esc(it.answer)}</div>${fi ? `<h3>评语</h3><div class="explain md">${md(fi.comment || '')}</div>` : ''}</div>`; }).join('')}
+    ${s.wrong && s.wrong.length ? `<h3>客观题错题（${s.wrong.length}）</h3>${s.wrong.map(w => { const q = BYID[w.qid]; return q ? `<div class="q">${objBody(q, w.yours || '', true)}</div>` : ''; }).join('')}` : ''}`);
+}
+
+/* ====== 启动 ====== */
+(async function boot() {
+  $('#view').innerHTML = '<div class="card">题库加载中…</div>';
+  try {
+    const r = await api('/api/bank');
+    BANK = r.items.filter(q => q && q.id && q.type && (q.type === 'case' || q.type === 'short' || q.answer));
+    const bad = r.files.filter(f => f.error);
+    if (bad.length) toast('以下题库文件解析失败：' + bad.map(f => f.file).join(','), 5000);
+  } catch (e) {
+    $('#view').innerHTML = '<div class="card notice">无法连接本地服务。请在 exam-app 目录运行 <code>python server.py</code> 后访问 http://127.0.0.1:8765/</div>';
+    return;
+  }
+  BANK.forEach(q => BYID[q.id] = q);
+  let p = null;
+  try { p = await api('/api/progress'); } catch { }
+  if (!p || !Object.keys(p).length) p = JSON.parse(localStorage.getItem('progress') || 'null');
+  P = initProgress(p);
+  go('home');
+})();
