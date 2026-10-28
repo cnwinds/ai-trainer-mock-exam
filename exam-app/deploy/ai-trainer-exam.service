@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Trainer Mock Exam
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/ai-trainer-mock-exam/exam-app
+ExecStart=/usr/bin/python3 server.py --no-browser
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

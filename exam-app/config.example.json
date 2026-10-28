@@ -1,0 +1,17 @@
+{
+  "host": "0.0.0.0",
+  "port": 8848,
+  "auth": {
+    "user": "admin",
+    "password": "改成你的访问密码"
+  },
+  "llm": {
+    "base_url": "https://你的模型网关/v1",
+    "api_key": "sk-xxx",
+    "model": "glm-5.3-flash",
+    "max_tokens": 16384,
+    "temperature": 0.2,
+    "timeout": 300,
+    "auto_grade": true
+  }
+}

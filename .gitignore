@@ -5,6 +5,9 @@ exam-app/submissions/*
 exam-app/feedback/*
 !exam-app/feedback/.gitkeep
 
+# 含模型密钥与访问密码
+exam-app/config.json
+
 # 重复打包文件
 *.zip
 

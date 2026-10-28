@@ -32,7 +32,8 @@ const PLAN = [
 ];
 
 /* ====== 状态 ====== */
-let BANK = [], BYID = {}, P = null, SESSION = null, TIMER = null;
+let BANK = [], BYID = {}, P = null, SESSION = null, TIMER = null, CONF = { llm: false };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const md = s => (window.marked ? marked.parse(String(s || '')) : '<pre>' + esc(s) + '</pre>');
@@ -78,6 +79,7 @@ function initProgress(p) {
   for (const k of ['q', 'kp', 'wrong', 'daily']) p[k] = p[k] || {};
   p.history = p.history || [];
   p.appliedFeedback = p.appliedFeedback || [];
+  p.fbApplied = p.fbApplied || {};
   return p;
 }
 function kpAcc(kp) { const s = P.kp[kp]; return s ? (s.score + 1) / (s.seen + 2) : 0.5; }
@@ -207,7 +209,7 @@ VIEWS.home = () => {
       ${untried.length ? `<div class="label" style="margin-top:8px">未练过：${untried.map(x => KP[x.k]).join('、')}</div>` : ''}
       <h3>题库</h3>
       <div class="label">客观题 ${objCount} · 简答 ${shortCount} · 实操/综合 ${caseCount}（2025 真题 ${BANK.filter(q => q.src === '2025真题').length} 道）</div>
-      <div class="notice" style="margin-top:10px">主观题提交后，在 Cursor 聊天中对我说 <b>“评卷”</b>，我会阅卷、写评语，并按你的短板追加新题。</div>
+      <div class="notice" style="margin-top:10px">${CONF.llm ? `主观题交卷后由 <b>${esc(CONF.model)}</b> 自动评卷，结果在交卷页和“评卷记录”中显示。` : '服务端未配置评卷模型。'}需要按短板追加新题时，在 Cursor 聊天里说 <b>“评卷”</b>。</div>
     </div>
   </div>
   <div class="card"><h3 style="margin-top:0">知识点掌握度（越靠前越弱）</h3>
@@ -368,8 +370,8 @@ async function renderExamResult() {
   <div class="card"><div class="row"><div><div class="label">${esc(S.title)}</div><div class="scorebig">${R.score}<small style="font-size:20px;color:var(--muted)"> / ${R.max}</small></div>
     <div class="label">客观题 ${R.objScore} / ${R.objMax}${hasShort ? ' · 简答为关键词预估分' : ''}</div></div><span class="spacer"></span>
     <div>${Object.entries(byType).map(([t, v]) => `<div>${TYPE[t]}：<b>${Math.round(v.got * 10) / 10}</b> / ${v.max}</div>`).join('')}</div></div>
-    ${hasShort ? `<div class="notice" style="margin-top:12px">${S.submitted ? '✅ 答卷已保存，等待 AI 评卷。' : '⚠️ 答卷保存失败（服务未启动？）'}去 Cursor 聊天里说 <b>“评卷”</b>，我会给简答逐题打分、写评语，并按短板出新题。</div>` : ''}
   </div>
+  ${hasShort ? (S.submitted ? gradingBox(S.id) : '<div class="notice">⚠️ 答卷保存失败（服务未启动？）</div>') : ''}
   <div class="card"><h3 style="margin-top:0">知识点得分</h3>${Object.entries(byKp).sort((a, b) => a[1].got / a[1].max - b[1].got / b[1].max).map(([k, v]) => `<div class="kprow"><span>${KP[k] || k}</span><div class="bar"><i style="width:${v.got / v.max * 100}%;background:${v.got / v.max >= .8 ? 'var(--ok)' : v.got / v.max >= .6 ? 'var(--warn)' : 'var(--bad)'}"></i></div><span class="n">${Math.round(v.got * 10) / 10}/${v.max}</span></div>`).join('')}
   <div class="row" style="margin-top:12px"><button class="btn pri" onclick="startWeak()">针对短板再练 30 题</button><button class="btn" onclick="go('exam')">再来一套</button></div></div>`;
   const groups = {};
@@ -383,6 +385,7 @@ async function renderExamResult() {
   $('#view').innerHTML = html; $('#view').onclick = null; $('#view').oninput = null;
   refreshNav();
   loadRefs();
+  if (hasShort && S.submitted) watchGrading(S.id);
 }
 function reviewQ(q, a, r, i) {
   const head = `<div class="qhead"><b>${i + 1}.</b><span class="tag">${TYPE[q.type]}</span><span class="tag">${KP[q.kp] || q.kp}</span><span class="tag ${q.src === '2025真题' ? 'y25' : 'new'}">${q.src}</span><span>${r ? r.got + ' / ' + r.pts + ' 分' : ''}</span></div>`;
@@ -514,14 +517,16 @@ async function practiceSummary() {
   let saved = '';
   if (PR.subj.length && !PR.saved) {
     PR.saved = true;
-    const ok = await api('/api/submit', { id: 'practice-' + Date.now(), created: nowStr(), kind: 'practice', title: PR.title, autoScore: PR.subj.reduce((s, x) => s + x.autoScore, 0), maxScore: PR.subj.reduce((s, x) => s + x.max, 0), subjective: PR.subj, wrong: objDone.filter(q => PR.done[q.id].f < .999).map(q => ({ qid: q.id, kp: q.kp, yours: PR.ans[q.id], answer: q.answer })) }).then(() => true).catch(() => false);
-    saved = ok ? '<div class="notice">简答已提交，在 Cursor 聊天里说“评卷”获取 AI 评分。</div>' : '';
+    const sid = 'practice-' + Date.now();
+    const ok = await api('/api/submit', { id: sid, created: nowStr(), kind: 'practice', title: PR.title, autoScore: PR.subj.reduce((s, x) => s + x.autoScore, 0), maxScore: PR.subj.reduce((s, x) => s + x.max, 0), subjective: PR.subj, wrong: objDone.filter(q => PR.done[q.id].f < .999).map(q => ({ qid: q.id, kp: q.kp, yours: PR.ans[q.id], answer: q.answer })) }).then(() => true).catch(() => false);
+    if (ok) { PR.sid = sid; saved = gradingBox(sid); }
   }
   const wrongs = objDone.filter(q => PR.done[q.id].f < .999);
   $('#view').innerHTML = `<h1>练习小结 · ${esc(PR.title)}</h1><div class="card">
     <div class="scorebig">${right} / ${objDone.length}</div><div class="label">客观题正确数（共作答 ${n} 题）</div>${saved}
     <div class="row" style="margin-top:12px"><button class="btn pri" onclick="startWeak()">继续弱项强化</button><button class="btn" onclick="go('practice')">换个专项</button><button class="btn" onclick="go('home')">回看板</button></div></div>
     ${wrongs.length ? '<h2>本次错题</h2>' + wrongs.map((q, i) => `<div class="q"><div class="qhead"><span class="tag">${TYPE[q.type]}</span><span class="tag">${KP[q.kp]}</span></div>${objBody(q, PR.ans[q.id] || '', true)}</div>`).join('') : ''}`;
+  if (saved && PR.sid) watchGrading(PR.sid);
 }
 
 /* ====== 错题本 ====== */
@@ -595,15 +600,17 @@ async function submitCase() {
   const frac = k.got / k.max;
   record(c, frac);
   const used = Math.round((Date.now() - CS.start) / 60000);
-  const ok = await api('/api/submit', { id: 'case-' + Date.now(), created: nowStr(), kind: 'case', title: `${c.module} ${c.title}`, autoScore: k.got, maxScore: 100, durationMin: used, limitMin: c.minutes,
+  const sid = 'case-' + Date.now();
+  const ok = await api('/api/submit', { id: sid, created: nowStr(), kind: 'case', title: `${c.module} ${c.title}`, autoScore: k.got, maxScore: 100, durationMin: used, limitMin: c.minutes,
     subjective: [{ qid: c.id, kp: c.kp, max: 100, stem: c.title, answer: CS.answer, autoScore: k.got, rubricHits: k.detail }] }).then(() => true).catch(() => false);
   $('#view').innerHTML = `<h1>${esc(c.title)} · 交卷</h1>
   <div class="card"><div class="row"><div><div class="label">关键词预估（仅供参考）</div><div class="scorebig">${k.got}<small style="font-size:20px;color:var(--muted)"> / 100</small></div><div class="label">用时 ${used} 分钟（限时 ${c.minutes}）</div></div></div>
-  <div class="notice" style="margin-top:12px">${ok ? '✅ 已提交。' : '⚠️ 提交失败。'}在 Cursor 聊天里说 <b>“评卷”</b>，我会按评分要点逐项打分并指出缺漏。</div></div>
+  </div>${ok ? gradingBox(sid) : '<div class="notice">⚠️ 提交失败</div>'}
   <div class="card"><h3 style="margin-top:0">评分要点对照</h3>${checklistTable(c, k)}</div>
   <div class="card"><h3 style="margin-top:0">你的作答</h3><div class="stem-pre">${esc(CS.answer)}</div></div>
   ${c.thinking ? `<div class="card"><h3 style="margin-top:0">答题思路</h3><div class="md">${md(c.thinking)}</div></div>` : ''}
   <div class="card"><h3 style="margin-top:0">参考答案</h3><div class="md" id="refbox">加载中…</div></div>`;
+  if (ok) watchGrading(sid);
   $('#refbox').innerHTML = await caseRefHtml(c);
 }
 
@@ -643,39 +650,88 @@ VIEWS.grading = async () => {
   let list = [];
   try { list = await api('/api/submissions'); } catch { }
   applyFeedback(list);
-  const pending = list.filter(s => !s.feedback && (s.kind === 'case' || s.kind === 'exam' || s.kind === 'practice'));
+  const pending = list.filter(s => !s.feedback && s.hasSubjective);
+  const status = s => s.feedback ? `<span class="tag ok">AI ${s.feedback.total ?? '-'} / ${s.feedback.max ?? s.maxScore ?? '-'}</span>`
+    : s.grading?.status === 'grading' ? `<span class="tag warn">评卷中 ${s.grading.done || 0}/${s.grading.total || '?'}</span>`
+    : s.grading?.status === 'error' ? `<span class="tag bad" title="${esc(s.grading.error)}">评卷失败</span>`
+    : s.hasSubjective ? '<span class="tag warn">待评卷</span>' : '<span class="tag">仅客观题</span>';
+  const action = s => !s.hasSubjective || !CONF.llm || s.grading?.status === 'grading' ? ''
+    : `<button class="btn sm" onclick="regrade('${s.id}')">${s.feedback ? '重新评卷' : 'AI 评卷'}</button>`;
   $('#view').innerHTML = `<h1>评卷记录</h1>
-  <div class="notice" style="margin-bottom:16px">待评 ${pending.length} 份。在 Cursor 聊天里对我说 <b>“评卷”</b>，我会读取这些答卷，写入评分与评语；刷新本页即可看到，并会同步修正你的知识点掌握度。</div>
+  <div class="notice" style="margin-bottom:16px">${CONF.llm ? `交卷后服务端自动调用 <b>${esc(CONF.model)}</b> 评卷，通常 1–3 分钟出结果，评分会同步修正知识点掌握度。` : '服务端未配置评卷模型。'}
+    待评 ${pending.length} 份。想要更深入的点评和按短板追加新题，可在 Cursor 聊天里说 <b>“评卷”</b>。</div>
   <div class="card">${list.length ? list.map(s => `<div class="list-item"><span class="tag">${esc((s.created || '').slice(0, 16).replace('T', ' '))}</span><span class="tag">${{ exam: '模拟卷', case: '实操', practice: '练习' }[s.kind] || s.kind}</span>
     <span>${esc(s.title)}</span><span class="spacer"></span><span class="label">预估 ${s.autoScore ?? '-'} / ${s.maxScore ?? '-'}</span>
-    ${s.feedback ? `<span class="tag ok">AI 评分 ${s.feedback.total ?? '-'} / ${s.feedback.max ?? s.maxScore ?? '-'}</span>` : '<span class="tag warn">待评卷</span>'}
-    <button class="btn sm" onclick="showSubmission('${s.id}')">查看</button></div>`).join('') : '<div class="label">暂无提交</div>'}</div>`;
+    ${status(s)}${action(s)}<button class="btn sm" onclick="showSubmission('${s.id}')">查看</button></div>`).join('') : '<div class="label">暂无提交</div>'}</div>`;
+  if (list.some(s => s.grading?.status === 'grading')) setTimeout(() => { if ($('#view h1')?.textContent === '评卷记录' && $('#modal').classList.contains('hidden')) VIEWS.grading(); }, 5000);
 };
 function applyFeedback(list) {
   let changed = false;
   for (const s of list) {
-    if (!s.feedback || P.appliedFeedback.includes(s.id)) continue;
+    if (!s.feedback) continue;
+    const stamp = s.feedback.graded_at || '1';
+    const prev = P.fbApplied[s.id];
+    if (prev && prev.stamp === stamp) continue;
+    if (!prev && P.appliedFeedback.includes(s.id)) continue;
+    const rec = { stamp, items: {} };
     for (const it of s.feedback.items || []) {
       const q = BYID[it.qid]; if (!q || !it.max) continue;
-      const ai = it.score / it.max, auto = (it.autoScore ?? null);
+      const ai = it.score / it.max;
+      const base = prev?.items?.[it.qid] ?? (it.autoScore != null ? it.autoScore / it.max : null);
       const k = P.kp[q.kp] || (P.kp[q.kp] = { seen: 0, score: 0 });
       const qs = P.q[q.id];
-      if (auto !== null && qs) { const delta = ai - auto / it.max; k.score += delta; qs.score += delta; qs.last = ai; }
+      if (base !== null && qs) { const d = ai - base; k.score += d; qs.score += d; qs.last = ai; }
       else { k.seen++; k.score += ai; }
+      rec.items[it.qid] = ai;
     }
-    P.appliedFeedback.push(s.id); changed = true;
+    P.fbApplied[s.id] = rec;
+    if (!P.appliedFeedback.includes(s.id)) P.appliedFeedback.push(s.id);
+    changed = true;
   }
   if (changed) { saveProgress(); toast('已同步 AI 评卷结果到掌握度'); }
 }
+function gradingBox(sid) {
+  return `<div class="card" id="gbox-${sid}">${CONF.llm ? `⏳ 正在提交 AI 评卷（${esc(CONF.model)}）…` : '<div class="notice">服务端未配置评卷模型，可在 Cursor 聊天里说“评卷”。</div>'}</div>`;
+}
+function feedbackHtml(s, f) {
+  const fbItem = qid => (f.items || []).find(x => x.qid === qid);
+  return `<h3 style="margin-top:0">AI 评卷：<span style="color:var(--pri)">${f.total ?? '-'} / ${f.max ?? s.maxScore}</span> <span class="label">${esc(f.grader || '')} · ${esc(f.graded_at || '')}</span></h3>
+    <div class="md">${md(f.summary || '')}</div>
+    ${(f.next_actions || []).length ? `<h3>下一步</h3><div class="md">${md(f.next_actions.map(x => '- ' + x).join('\n'))}</div>` : ''}
+    ${(s.subjective || []).map(it => { const fi = fbItem(it.qid); const q = BYID[it.qid]; if (!fi) return '';
+      return `<div class="q"><div class="qhead"><span class="tag">${q ? TYPE[q.type] : ''}</span><span class="tag">${KP[it.kp] || it.kp}</span><span>关键词预估 ${it.autoScore}/${it.max}</span><span class="tag ok">AI ${fi.score}/${fi.max}</span></div>
+        <div class="stem">${esc(q && q.type === 'case' ? q.title : it.stem)}</div><div class="explain md">${md(fi.comment || '')}</div></div>`; }).join('')}`;
+}
+async function watchGrading(sid) {
+  if (!CONF.llm) return;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 20 * 60000) {
+    const el = document.getElementById('gbox-' + sid); if (!el) return;
+    let r; try { r = await api('/api/submission/' + sid); } catch { await sleep(4000); continue; }
+    if (r.feedback) { el.innerHTML = feedbackHtml(r.submission, r.feedback); applyFeedback([{ id: sid, feedback: r.feedback }]); return; }
+    if (r.grading?.status === 'error') { el.innerHTML = `<div class="notice">⚠️ AI 评卷失败：${esc(r.grading.error)} <button class="btn sm" onclick="regrade('${sid}')">重试</button></div>`; return; }
+    if (!r.grading) { el.innerHTML = `<button class="btn pri" onclick="regrade('${sid}')">开始 AI 评卷</button>`; return; }
+    el.innerHTML = `⏳ AI 评卷中…已完成 ${r.grading.done || 0} / ${r.grading.total || '?'} 题（${esc(CONF.model)}）。可以先看下方解析，评完会自动显示在这里。`;
+    await sleep(3000);
+  }
+}
+async function regrade(sid) {
+  const r = await api('/api/grade/' + sid, {}).catch(() => ({ ok: false }));
+  if (!r.ok) return toast(r.error || '无法开始评卷');
+  const el = document.getElementById('gbox-' + sid);
+  if (el) { el.innerHTML = '⏳ AI 评卷中…'; watchGrading(sid); }
+  else { toast('已开始评卷'); if ($('#view h1')?.textContent === '评卷记录') VIEWS.grading(); }
+}
 async function showSubmission(id) {
-  const { submission: s, feedback: f } = await api('/api/submission/' + id);
-  const fbItem = qid => (f?.items || []).find(x => x.qid === qid);
+  const { submission: s, feedback: f, grading: g } = await api('/api/submission/' + id);
+  if (f) applyFeedback([{ id, feedback: f }]);
   openModal(`<h2 style="margin-top:0">${esc(s.title)}</h2><div class="label">${esc(s.created)} · 预估 ${s.autoScore} / ${s.maxScore}${s.durationMin != null ? ' · 用时 ' + s.durationMin + ' 分钟' : ''}</div>
-    ${f ? `<div class="card" style="margin-top:12px;background:#f8fafc"><h3 style="margin-top:0">AI 评卷：${f.total ?? '-'} / ${f.max ?? s.maxScore}</h3><div class="md">${md(f.summary || '')}</div>
-      ${f.next_actions ? `<h3>下一步</h3><div class="md">${md((f.next_actions || []).map(x => '- ' + x).join('\n'))}</div>` : ''}</div>` : '<div class="notice" style="margin-top:12px">尚未评卷</div>'}
-    ${(s.subjective || []).map(it => { const fi = fbItem(it.qid); const q = BYID[it.qid]; return `<div class="q"><div class="qhead"><span class="tag">${q ? TYPE[q.type] : ''}</span><span class="tag">${KP[it.kp] || it.kp}</span><span>预估 ${it.autoScore}/${it.max}</span>${fi ? `<span class="tag ok">AI ${fi.score}/${fi.max}</span>` : ''}</div>
-      <div class="stem">${esc(it.stem)}</div><h3>作答</h3><div class="stem-pre">${esc(it.answer)}</div>${fi ? `<h3>评语</h3><div class="explain md">${md(fi.comment || '')}</div>` : ''}</div>`; }).join('')}
+    ${f ? `<div class="card" style="margin-top:12px;background:#f8fafc">${feedbackHtml(s, f)}</div>` : (s.subjective || []).length ? gradingBox(id) : ''}
+    ${(s.subjective || []).length ? '<h3>你的作答</h3>' : ''}
+    ${(s.subjective || []).map(it => { const q = BYID[it.qid]; return `<div class="q"><div class="qhead"><span class="tag">${q ? TYPE[q.type] : ''}</span><span class="tag">${KP[it.kp] || it.kp}</span><span>预估 ${it.autoScore}/${it.max}</span></div>
+      <div class="stem">${esc(q && q.type === 'case' ? q.title : it.stem)}</div><div class="stem-pre">${esc(it.answer)}</div></div>`; }).join('')}
     ${s.wrong && s.wrong.length ? `<h3>客观题错题（${s.wrong.length}）</h3>${s.wrong.map(w => { const q = BYID[w.qid]; return q ? `<div class="q">${objBody(q, w.yours || '', true)}</div>` : ''; }).join('')}` : ''}`);
+  if (!f && (s.subjective || []).length) watchGrading(id);
 }
 
 /* ====== 启动 ====== */
@@ -691,6 +747,7 @@ async function showSubmission(id) {
     return;
   }
   BANK.forEach(q => BYID[q.id] = q);
+  CONF = await api('/api/config').catch(() => ({ llm: false }));
   let p = null;
   try { p = await api('/api/progress'); } catch { }
   if (!p || !Object.keys(p).length) p = JSON.parse(localStorage.getItem('progress') || 'null');

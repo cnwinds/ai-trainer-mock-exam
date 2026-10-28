@@ -14,10 +14,26 @@
 | 2025 真题解析 | 83 道理论题完整答案 + 解析 + 答题思路，可遮挡答案自测；备考文档 |
 | 评卷记录 | 主观题提交记录与 AI 评卷结果 |
 
-## AI 评卷闭环
-1. 做完模拟卷 / 简答 / 实操后自动保存到 `submissions/`。
-2. 在 Cursor 聊天里说 **“评卷”**。AI 读取答卷，写评语到 `feedback/`，并按短板追加新题到 `data/bank/ai_round*.json`。
-3. 刷新页面：评卷记录显示分数与评语，掌握度同步修正，弱项强化优先抽新题。
+## AI 评卷
+- **服务端自动评卷**：交卷后答卷存到 `submissions/`，服务端调用 `config.json` 里配置的大模型（OpenAI 兼容接口），按评分要点逐项打分，写入 `feedback/`。页面自动轮询显示分数、逐项理由与改进写法，并修正知识点掌握度。评卷记录页可“重新评卷”。
+- **Cursor 深度评卷**：在 Cursor 聊天里说 **“评卷”**，AI 会复核答卷，并按短板追加新题到 `data/bank/ai_round*.json`。
+
+### 配置评卷模型
+```bash
+python tools/import_pi_model.py glm-5.3-flash   # 从 ~/.pi/agent/models.json 导入，生成 config.json
+python grader.py --ping                         # 测试连通
+```
+也可以复制 `config.example.json` 为 `config.json` 手动填写，或用环境变量 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 覆盖。`config.json` 含密钥，已被 `.gitignore` 排除。
+
+## 部署到公网服务器
+1. 服务器安装 Python 3.8+，拉取代码：`git clone git@github.com:cnwinds/ai-trainer-mock-exam.git /opt/ai-trainer-mock-exam`
+2. 在 `exam-app/` 下创建 `config.json`（参考 `config.example.json`）：
+   - `host` 设为 `0.0.0.0`，`port` 按需；
+   - **必须设置 `auth.password`**，否则任何人都能访问并消耗模型额度（浏览器会弹出账号密码框）；
+   - `llm.base_url` 必须是**服务器能访问到的地址**。pi 里 `glm-5.3-flash` 的地址 `192.168.11.39` 是内网 IP，公网服务器访问不到，需要把该网关暴露到公网（如反向代理/内网穿透），或换成公网可达的模型接口。
+3. 运行：`python3 server.py --no-browser`；长期运行可用 `deploy/ai-trainer-exam.service`（systemd，按实际路径和用户修改后 `systemctl enable --now ai-trainer-exam`）。
+4. 建议用 Nginx/Caddy 反代并开启 HTTPS（Basic Auth 密码在 HTTP 下是明文传输）。
+5. 数据都在 `exam-app/data/progress.json`、`submissions/`、`feedback/`，迁移时一起复制。系统按单用户设计，多人共用会共享同一份进度。
 
 ## 数据
 - `data/bank/*.json`：题库（`y2025_*` 真题；`new_*` 新编；`ai_round*` AI 按短板追加）

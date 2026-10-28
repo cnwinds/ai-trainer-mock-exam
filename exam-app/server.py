@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""人工智能训练师刷题系统 - 本地服务（仅依赖 Python 标准库）
+"""人工智能训练师刷题系统 - 服务端（仅依赖 Python 标准库）
 
-python server.py  →  http://127.0.0.1:8765
+python server.py                 本机使用  http://127.0.0.1:8848
+HOST=0.0.0.0 python server.py    公网/局域网部署（务必在 config.json 设置 auth 密码）
+配置：config.json（参考 config.example.json），环境变量可覆盖。
 """
-import json, os, sys, time, pathlib, threading, webbrowser
+import base64, json, os, sys, time, pathlib, threading, webbrowser
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -15,7 +17,7 @@ PROGRESS = APP / "data" / "progress.json"
 SUBMIT = APP / "submissions"
 FEEDBACK = APP / "feedback"
 DOCS = ROOT / "备考输出"
-PORT = int(os.environ.get("PORT", "8848"))
+CONFIG = APP / "config.json"
 LOCK = threading.Lock()
 
 for d in (SUBMIT, FEEDBACK, PROGRESS.parent):
@@ -35,17 +37,77 @@ def write_json(p, obj):
     os.replace(tmp, p)
 
 
+def load_config():
+    cfg = read_json(CONFIG, {})
+    cfg.setdefault("host", "127.0.0.1")
+    cfg.setdefault("port", 8848)
+    cfg.setdefault("auth", {})
+    llm = cfg.setdefault("llm", {})
+    llm.setdefault("auto_grade", True)
+    env = os.environ
+    if env.get("HOST"): cfg["host"] = env["HOST"]
+    if env.get("PORT"): cfg["port"] = int(env["PORT"])
+    if env.get("EXAM_USER"): cfg["auth"]["user"] = env["EXAM_USER"]
+    if env.get("EXAM_PASSWORD"): cfg["auth"]["password"] = env["EXAM_PASSWORD"]
+    for k, e in (("base_url", "LLM_BASE_URL"), ("api_key", "LLM_API_KEY"), ("model", "LLM_MODEL")):
+        if env.get(e): llm[k] = env[e]
+    return cfg
+
+
+CFG = load_config()
+from grader import LLM, grade_submission  # noqa: E402
+
+LLM_CLIENT = LLM(CFG["llm"])
+GRADING = {}  # sid -> {"status": "grading"|"error", "done": n, "total": n, "error": str}
+
+
+def start_grading(sid):
+    if not LLM_CLIENT.ok or GRADING.get(sid, {}).get("status") == "grading":
+        return False
+    sub = read_json(SUBMIT / f"{sid}.json", None)
+    if not sub or not sub.get("subjective"):
+        return False
+    GRADING[sid] = {"status": "grading", "done": 0, "total": len(sub["subjective"])}
+
+    def run():
+        def prog(d, n):
+            GRADING[sid].update(done=d, total=n)
+        try:
+            grade_submission(LLM_CLIENT, sid, prog)
+            GRADING.pop(sid, None)
+            print(f"[评卷完成] {sid}", flush=True)
+        except Exception as e:
+            GRADING[sid] = {"status": "error", "error": str(e)[:300]}
+            print(f"[评卷失败] {sid}: {e}", flush=True)
+
+    threading.Thread(target=run, daemon=True).start()
+    return True
+
+
 class H(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
 
     def log_message(self, fmt, *args):
-        if "/api/" in (args[0] if args else ""):
-            sys.stderr.write("%s\n" % (fmt % args))
+        if "/api/" in str(args[0] if args else "") and "/api/submission/" not in str(args[0]):
+            sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def _authed(self):
+        a = CFG.get("auth") or {}
+        if not a.get("password"):
+            return True
+        want = base64.b64encode(f"{a.get('user', 'admin')}:{a['password']}".encode()).decode()
+        if self.headers.get("Authorization", "") == "Basic " + want:
+            return True
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="ai-trainer-exam", charset="UTF-8"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return False
 
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -57,11 +119,18 @@ class H(SimpleHTTPRequestHandler):
 
     def _body(self):
         n = int(self.headers.get("Content-Length", 0))
+        if n > 5 * 1024 * 1024:
+            raise ValueError("body too large")
         return json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
 
     def do_GET(self):
+        if not self._authed():
+            return
         u = urlparse(self.path)
         p = u.path
+        if p == "/api/config":
+            return self._json({"llm": LLM_CLIENT.ok, "model": LLM_CLIENT.model if LLM_CLIENT.ok else None,
+                               "auto_grade": bool(CFG["llm"].get("auto_grade"))})
         if p == "/api/bank":
             items, files = [], []
             for f in sorted(BANK.glob("*.json")):
@@ -86,20 +155,24 @@ class H(SimpleHTTPRequestHandler):
             out = []
             for f in sorted(SUBMIT.glob("*.json"), reverse=True):
                 s = read_json(f, {})
-                fb = read_json(FEEDBACK / f.name, None)
-                out.append({"id": s.get("id"), "created": s.get("created"), "kind": s.get("kind"),
+                sid = s.get("id") or f.stem
+                out.append({"id": sid, "created": s.get("created"), "kind": s.get("kind"),
                             "title": s.get("title"), "autoScore": s.get("autoScore"), "maxScore": s.get("maxScore"),
-                            "feedback": fb})
+                            "hasSubjective": bool(s.get("subjective")),
+                            "feedback": read_json(FEEDBACK / f.name, None), "grading": GRADING.get(sid)})
             return self._json(out)
         if p.startswith("/api/submission/"):
             sid = p.rsplit("/", 1)[-1]
             s = read_json(SUBMIT / f"{sid}.json", None)
             if s is None:
                 return self._json({"error": "not found"}, 404)
-            return self._json({"submission": s, "feedback": read_json(FEEDBACK / f"{sid}.json", None)})
+            return self._json({"submission": s, "feedback": read_json(FEEDBACK / f"{sid}.json", None),
+                               "grading": GRADING.get(sid)})
         return super().do_GET()
 
     def do_POST(self):
+        if not self._authed():
+            return
         p = urlparse(self.path).path
         try:
             body = self._body()
@@ -110,25 +183,39 @@ class H(SimpleHTTPRequestHandler):
                 write_json(PROGRESS, body)
             return self._json({"ok": True})
         if p == "/api/submit":
-            sid = body.get("id") or time.strftime("%Y%m%d-%H%M%S")
+            sid = "".join(c for c in str(body.get("id") or time.strftime("%Y%m%d-%H%M%S")) if c.isalnum() or c in "-_")
             body["id"] = sid
             with LOCK:
                 write_json(SUBMIT / f"{sid}.json", body)
-            return self._json({"ok": True, "id": sid})
+            grading = CFG["llm"].get("auto_grade") and start_grading(sid)
+            return self._json({"ok": True, "id": sid, "grading": bool(grading)})
+        if p.startswith("/api/grade/"):
+            sid = p.rsplit("/", 1)[-1]
+            if not LLM_CLIENT.ok:
+                return self._json({"ok": False, "error": "服务端未配置评卷模型"}, 400)
+            (FEEDBACK / f"{sid}.json").unlink(missing_ok=True)
+            return self._json({"ok": start_grading(sid)})
         return self._json({"error": "unknown"}, 404)
 
 
 def main():
+    if os.name == "nt":
+        ThreadingHTTPServer.allow_reuse_address = False  # Windows 上允许重复绑定会让新旧进程同时监听同一端口
+    host, port = CFG["host"], int(CFG["port"])
     srv = None
-    for port in (PORT, 8848, 18765, 28765, 0):
+    for pt in (port, 8848, 18765, 28765, 0):
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", port), H)
+            srv = ThreadingHTTPServer((host, pt), H)
             break
         except OSError:
             continue
-    url = f"http://127.0.0.1:{srv.server_address[1]}/"
-    print(f"刷题系统已启动：{url}  (Ctrl+C 退出)", flush=True)
-    if "--no-browser" not in sys.argv:
+    shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    url = f"http://{shown}:{srv.server_address[1]}/"
+    print(f"刷题系统已启动：{url}  监听 {host}:{srv.server_address[1]}  (Ctrl+C 退出)", flush=True)
+    print(f"AI 评卷：{'已启用 ' + LLM_CLIENT.model + ' @ ' + LLM_CLIENT.base if LLM_CLIENT.ok else '未配置（见 config.example.json）'}", flush=True)
+    if host not in ("127.0.0.1", "localhost") and not (CFG.get("auth") or {}).get("password"):
+        print("⚠️  当前监听非本机地址且未设置访问密码，任何人都能访问并消耗你的模型额度！请在 config.json 设置 auth.password", flush=True)
+    if "--no-browser" not in sys.argv and host in ("127.0.0.1", "localhost"):
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()
