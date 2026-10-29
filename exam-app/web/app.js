@@ -8,28 +8,36 @@ const KP = {
 };
 const TYPE = { judge: '判断题', single: '单选题', multi: '多选题', short: '简答题', case: '实操/综合' };
 const LETTERS = 'ABCDEFGH';
+const Y26 = '2026样卷', Y25 = '2025真题';
+const srcCls = q => q.src === Y26 ? 'y26' : q.src === Y25 ? 'y25' : 'new';
+const isObj = q => ['judge', 'single', 'multi'].includes(q.type);
+// focus: 该题型的 2026 样卷题全部入卷，余量从其他题按短板加权补足；only26: 只用样卷题（shuffle 时打乱题序，否则按原题号）
 const EXAM_CFG = {
-  standard: { name: '标准模拟卷（A 理论 · 100 分 · 90 分钟）', min: 90, parts: [['judge', 10, 1], ['single', 40, 1], ['multi', 5, 2], ['short', 4, 10]] },
+  y2026all: { name: '2026 样卷全题打乱卷（原题 83 道 · 72 分 · 65 分钟）', min: 65, only26: true, shuffle: true, parts: [['judge', 14, 0.5], ['single', 56, 0.5], ['multi', 7, 1], ['short', 6, 5]] },
+  y2026obj: { name: '2026 样卷客观题打乱卷（原题 77 道 · 42 分 · 35 分钟）', min: 35, only26: true, shuffle: true, parts: [['judge', 14, 0.5], ['single', 56, 0.5], ['multi', 7, 1]] },
+  y2026raw: { name: '2026 样卷原卷（原题顺序 · 72 分 · 65 分钟）', min: 65, only26: true, parts: [['judge', 14, 0.5], ['single', 56, 0.5], ['multi', 7, 1], ['short', 6, 5]] },
+  y2026: { name: '2026 模拟卷（样卷 83 道 + 补足 35 道 · 100 分 · 90 分钟，第二阶段用）', min: 90, focus: true, parts: [['judge', 20, 0.5], ['single', 80, 0.5], ['multi', 10, 1], ['short', 8, 5]] },
+  standard: { name: '2025 框架模拟卷（100 分 · 90 分钟）', min: 90, parts: [['judge', 10, 1], ['single', 40, 1], ['multi', 5, 2], ['short', 4, 10]] },
   quick: { name: '快速小卷（36 分 · 30 分钟）', min: 30, parts: [['judge', 5, 1], ['single', 15, 1], ['multi', 3, 2], ['short', 1, 10]] },
-  objective: { name: '纯客观题卷（60 分 · 45 分钟）', min: 45, parts: [['judge', 10, 1], ['single', 40, 1], ['multi', 5, 2]] },
-  shortonly: { name: '简答专练卷（40 分 · 40 分钟）', min: 40, parts: [['short', 4, 10]] },
+  shortonly: { name: '简答专练卷（30 分 · 36 分钟，每题 5 分）', min: 36, focus: true, parts: [['short', 6, 5]] },
 };
 const PLAN = [
-  '2025 真题客观题通刷一遍（真题解析页遮挡答案自测），错题进错题本',
-  '专项：职业道德 + 法律法规 + 办公 + AI 安全',
-  '专项：业务流程 + 产品增长 + 项目管理 + 培训指导',
-  '专项：机器学习 + 深度学习 + 数据结构算法',
-  '专项：数据工程 + 大模型 + 智能系统设计',
-  '简答专练卷 ×1 → 提交评卷；背 6 道真题简答骨架',
-  '第 1 次标准模拟卷（90 分钟限时）→ 提交评卷',
-  '实操：B1.1 点餐框架 + B1.2 房产挖掘（限时）',
-  '实操：B2 训练集/黄金测试集/KS（限时）',
-  '实操：B3 智慧物业全链路（35 分钟限时）',
-  '实操：B4 培训计划 + C 合同审查（限时）',
-  '第 2 次标准模拟卷 + 弱项强化 30 题',
-  '新编实操案例 ×2 + 弱项强化 + 错题清零',
-  '第 3 次标准模拟卷 + 错题本过一遍 + 速记卡（备考输出/11）',
+  '样卷客观题 77 题通刷（样卷解析页遮挡答案自测），错题进错题本',
+  '样卷简答 6 题：先背参考答案骨架，再“样卷简答专练”限时作答 → 评卷',
+  '样卷 B1.1 质检流程（25 分钟限时）+ B1.2 会议室 pandas（默写参考 notebook）',
+  '样卷 B2 冷链随机森林：代码默写到 10 分钟内 + 任务三结论',
+  '样卷 B3 能源调度（35 分钟限时）+ B4 客服培训（15 分钟）',
+  '样卷 C 场馆客流（30 分钟限时）→ 评卷',
+  '第 1 次“样卷全题打乱卷”→ 评卷；“刷未掌握的样卷题”',
+  '未掌握样卷题清零 + 错题本清零',
+  '样卷 B2 + B1.2 脱稿限时再做，对照 checklist 补漏',
+  '第 2 次“样卷全题打乱卷” + 低于 90% 的简答重写',
+  '样卷 B3 + C 脱稿限时再做',
+  '样卷 B1.1 + B4 脱稿限时再做；低于 85 分的实操再练一遍',
+  '第 3 次“样卷全题打乱卷”→ 对照看板“熟练标准”查漏',
+  '样卷原卷全真模拟 + 参考答案通读；熟练标准全部达标后再进入变式题阶段',
 ];
+const GATE = { objStreak: 3, fullExams: 2, shortPass: 0.9, casePass: 0.85 };
 
 /* ====== 状态 ====== */
 let BANK = [], BYID = {}, P = null, SESSION = null, TIMER = null, CONF = { llm: false };
@@ -104,8 +112,44 @@ function weight(q) {
     if (s.last < 0.999) w *= 3;
     if (s.streak >= 2) w *= 0.25;
   }
-  if (q.src === '2025真题') w *= 1.2;
+  if (q.src === Y26) w *= 3;
+  else if (q.src === Y25) w *= 1.2;
   return w;
+}
+const mastered = q => (P.q[q.id]?.streak || 0) >= (q.src === Y26 ? GATE.objStreak : 2);
+const passedSubj = (q, th) => (P.q[q.id]?.last ?? -1) >= th;
+function y26Stats() {
+  const objs = BANK.filter(q => q.src === Y26 && isObj(q));
+  const shorts = BANK.filter(q => q.src === Y26 && q.type === 'short');
+  const cases = BANK.filter(q => q.src === Y26 && q.type === 'case');
+  const recent = P.history.filter(h => ['y2026all', 'y2026obj'].includes(h.cfg)).slice(-GATE.fullExams);
+  const fullExams = recent.filter(h => h.objMax && h.objScore >= h.objMax).length;
+  const s = {
+    objs, subj: shorts.concat(cases), total: objs.length,
+    mastered: objs.filter(mastered).length,
+    seen: objs.filter(q => P.q[q.id]).length,
+    wrong: objs.filter(q => P.wrong[q.id]).length,
+    subjDone: shorts.concat(cases).filter(q => P.q[q.id]).length,
+    shortOk: shorts.filter(q => passedSubj(q, GATE.shortPass)), shorts,
+    caseOk: cases.filter(q => passedSubj(q, GATE.casePass)), cases,
+    fullExams, recentN: recent.length,
+  };
+  s.gates = [
+    [`客观题 ${s.total} 道每题连续答对 ≥ ${GATE.objStreak} 次`, s.mastered, s.total],
+    [`最近 ${GATE.fullExams} 次打乱卷客观题满分`, fullExams, GATE.fullExams],
+    [`简答 ${shorts.length} 道最近一次 ≥ ${GATE.shortPass * 5} 分`, s.shortOk.length, shorts.length],
+    [`实操 ${cases.length} 道最近一次 ≥ ${GATE.casePass * 100} 分`, s.caseOk.length, cases.length],
+  ];
+  s.unlocked = s.gates.every(([, a, b]) => a >= b);
+  if (s.unlocked && !P.settings.stage2At) { P.settings.stage2At = today(); saveProgress(); }
+  return s;
+}
+function start26Unmastered() {
+  const { objs } = y26Stats();
+  const rest = objs.filter(q => !mastered(q));
+  if (!rest.length) return startPracticeList(shuffle(objs), '2026 样卷客观题 · 全部已掌握，再巩固一遍');
+  const rank = q => P.wrong[q.id] ? 0 : !P.q[q.id] ? 1 : 2;
+  startPracticeList(shuffle(rest).sort((a, b) => rank(a) - rank(b)), `2026 样卷 · 未掌握 ${rest.length} 题（错题优先）`);
 }
 function pickWeighted(pool, n, adaptive = true) {
   return pool.map(q => ({ q, k: Math.pow(Math.random(), 1 / (adaptive ? weight(q) : 1)) }))
@@ -182,7 +226,30 @@ VIEWS.home = () => {
   const untried = kps.filter(x => x.seen === 0 && x.total > 0);
   const wrongN = Object.keys(P.wrong).length;
   const color = a => a >= 0.85 ? 'var(--ok)' : a >= 0.7 ? '#65a30d' : a >= 0.55 ? 'var(--warn)' : 'var(--bad)';
+  const ys = y26Stats();
+  const pct = n => ys.total ? Math.round(n / ys.total * 100) : 0;
+  const unmastered = ys.total - ys.mastered;
+  const subjLeft = ys.shorts.filter(q => !ys.shortOk.includes(q)).concat(ys.cases.filter(q => !ys.caseOk.includes(q)));
   $('#view').innerHTML = `
+  <div class="card y26card">
+    <div class="row"><h3 style="margin:0">🎯 2026 样卷 · 原题熟练</h3>
+      ${ys.unlocked ? `<span class="tag ok">第二阶段 · 变式题（${esc(P.settings.stage2At)} 达标）</span>` : '<span class="tag y26">第一阶段 · 只练原题</span>'}
+      <span class="spacer"></span><span class="label">${ys.unlocked ? '原题已熟练，可在 Cursor 聊天里说“出变式题”' : '四项熟练标准全部达标后，再进入变式题阶段'}</span></div>
+    <div class="row" style="margin:10px 0 6px;align-items:baseline"><div class="stat">${ys.mastered}<small> / ${ys.total} 客观题已熟练（${pct(ys.mastered)}%）</small></div>
+      <span class="label">做过 ${ys.seen} · 错题本中 ${ys.wrong} · 简答/实操练过 ${ys.subjDone} / ${ys.subj.length}</span></div>
+    <div class="bar"><i style="width:${pct(ys.mastered)}%;background:var(--ok)"></i></div>
+    <div class="gates">${ys.gates.map(([t, a, b]) => `<div class="${a >= b ? 'ok' : ''}">${a >= b ? '✅' : '⬜'} ${t}<b>${a} / ${b}</b></div>`).join('')}</div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn pri" onclick="startExam('y2026all')">样卷全题打乱卷（83 道原题）</button>
+      <button class="btn" onclick="start26Unmastered()">刷未熟练的样卷客观题（${unmastered}）</button>
+      <button class="btn" onclick="startExam('y2026obj')">客观题打乱卷</button>
+      <button class="btn" onclick="startExam('shortonly')">样卷简答专练</button>
+      <button class="btn" onclick="go('cases')">样卷实操 B/C${subjLeft.filter(q => q.type === 'case').length ? `（未达标 ${subjLeft.filter(q => q.type === 'case').length}）` : ''}</button>
+      <button class="btn" onclick="startExam('y2026raw')">原题顺序全真</button>
+      <button class="btn" onclick="RV.year='2026';go('review')">样卷解析</button>
+      ${ys.unlocked ? `<button class="btn" onclick="startExam('y2026')">2026 模拟卷（含补足题）</button>` : ''}
+    </div>
+  </div>
   <div class="grid g4">
     <div class="card"><div class="label">距考试</div><div class="stat">${daysLeft}<small>天</small></div>
       <div class="label">考试日 <input type="date" id="examDate" value="${P.settings.examDate}" style="padding:2px 6px"></div></div>
@@ -199,7 +266,7 @@ VIEWS.home = () => {
     <div class="card">
       <h3 style="margin-top:0">快速开始</h3>
       <div class="row" style="margin-bottom:10px">
-        <button class="btn pri" onclick="startExam('standard')">标准模拟卷</button>
+        <button class="btn pri" onclick="startExam('y2026all')">样卷全题打乱卷</button>
         <button class="btn" onclick="startExam('quick')">30 分钟小卷</button>
         <button class="btn" onclick="startWeak()">弱项强化 30 题</button>
         <button class="btn" onclick="go('cases')">实操 B/C</button>
@@ -208,7 +275,7 @@ VIEWS.home = () => {
       ${weak.length ? weak.map(w => `<div>⚠️ <b>${KP[w.k]}</b> 得分率 ${Math.round(w.acc * 100)}%（${w.seen} 次）<a onclick="startPractice(['${w.k}'])"> 专练 →</a></div>`).join('') : '<div class="label">还没有作答数据，先做一套模拟卷吧。</div>'}
       ${untried.length ? `<div class="label" style="margin-top:8px">未练过：${untried.map(x => KP[x.k]).join('、')}</div>` : ''}
       <h3>题库</h3>
-      <div class="label">客观题 ${objCount} · 简答 ${shortCount} · 实操/综合 ${caseCount}（2025 真题 ${BANK.filter(q => q.src === '2025真题').length} 道）</div>
+      <div class="label">客观题 ${objCount} · 简答 ${shortCount} · 实操/综合 ${caseCount}（2026 样卷 ${BANK.filter(q => q.src === Y26).length} 道 · 2025 真题 ${BANK.filter(q => q.src === Y25).length} 道）</div>
       <div class="notice" style="margin-top:10px">${CONF.llm ? `主观题交卷后由 <b>${esc(CONF.model)}</b> 自动评卷，结果在交卷页和“评卷记录”中显示。` : '服务端未配置评卷模型。'}需要按短板追加新题时，在 Cursor 聊天里说 <b>“评卷”</b>。</div>
     </div>
   </div>
@@ -231,11 +298,12 @@ VIEWS.exam = () => {
     <h3 style="margin-top:0">组卷设置</h3>
     <div class="row" style="margin-bottom:12px">
       <label>试卷类型 <select id="cfg">${Object.entries(EXAM_CFG).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('')}</select></label>
-      <label>题源 <select id="srcSel"><option value="all">全部（真题 + 新编）</option><option value="new">仅新编题</option><option value="y25">仅 2025 真题</option></select></label>
+      <label>补足题源 <select id="srcSel"><option value="all">全部（真题 + 新编）</option><option value="new">仅新编题</option><option value="y25">仅 2025 真题</option></select></label>
       <label><input type="checkbox" id="adaptive" checked> 按短板加权抽题</label>
     </div>
     <button class="btn pri" onclick="startExam($('#cfg').value,$('#srcSel').value,$('#adaptive').checked)">生成试卷并开始计时</button>
-    <p class="label">分值按 2025 评分框架：判断 10 分 / 单选 40 分 / 多选 10 分（每题 2 分，少选得 1 分，错选 0 分）/ 简答 40 分。简答先按关键词预估分，最终以我的评卷为准。</p>
+    <p class="label"><b>第一阶段（原题熟练）</b>：用“样卷全题打乱卷 / 客观题打乱卷”，只出 2026 样卷原题、每次打乱题序，分值按 2026 框架（判断、单选每题 0.5 分，多选 1 分且少选得一半，简答 5 分）。打乱卷的客观题连续 2 次满分是进入第二阶段的条件之一。<br>
+    <b>第二阶段</b>：“2026 模拟卷”按完整 2026 框架出 118 题 100 分，样卷 83 道全部入卷，其余 35 道从“补足题源”按短板加权抽取。简答先按关键词预估，交卷后 AI 评卷修正。</p>
   </div>
   <div class="card"><h3 style="margin-top:0">历史成绩</h3>
     ${P.history.length ? P.history.slice().reverse().slice(0, 15).map(h => `<div class="list-item"><span class="tag">${esc(h.date)}</span><span>${esc(h.title)}</span><span class="spacer"></span><b>${h.score} / ${h.max}</b><span class="label">客观题 ${h.objScore}/${h.objMax}</span></div>`).join('') : '<div class="label">暂无</div>'}
@@ -245,10 +313,19 @@ function buildPaper(cfgKey, src, adaptive) {
   const cfg = EXAM_CFG[cfgKey];
   const qs = [];
   for (const [type, n, pts] of cfg.parts) {
-    let pool = BANK.filter(q => q.type === type);
-    if (src === 'new') pool = pool.filter(q => q.src !== '2025真题');
-    if (src === 'y25') pool = pool.filter(q => q.src === '2025真题');
-    pickWeighted(pool, n, adaptive).forEach(q => qs.push({ id: q.id, pts }));
+    const all = BANK.filter(q => q.type === type);
+    let picked = [];
+    if (cfg.only26 || cfg.focus) {
+      const y26 = all.filter(q => q.src === Y26);
+      picked = cfg.only26 && !cfg.shuffle ? y26.sort((a, b) => a.no - b.no).slice(0, n) : shuffle(y26).slice(0, n);
+    }
+    if (!cfg.only26 && picked.length < n) {
+      let pool = cfg.focus ? all.filter(q => q.src !== Y26) : all;
+      if (src === 'new') pool = pool.filter(q => q.src !== Y25 && q.src !== Y26);
+      if (src === 'y25') pool = pool.filter(q => q.src === Y25);
+      picked = cfg.focus ? shuffle(picked.concat(pickWeighted(pool, n - picked.length, adaptive))) : pickWeighted(pool, n, adaptive);
+    }
+    picked.forEach(q => qs.push({ id: q.id, pts }));
   }
   return { id: 'exam-' + Date.now(), kind: 'exam', cfg: cfgKey, title: cfg.name, questions: qs, answers: {}, marks: {}, start: Date.now(), end: Date.now() + cfg.min * 60000, running: true };
 }
@@ -258,9 +335,9 @@ function startExam(cfgKey, src = 'all', adaptive = true) {
   go('exam-run');
 }
 function startWeak() {
-  const objs = BANK.filter(q => ['judge', 'single', 'multi'].includes(q.type));
-  const picked = pickWeighted(objs, 30, true);
-  startPracticeList(picked, '弱项强化 30 题');
+  const stage1 = !y26Stats().unlocked;
+  const objs = BANK.filter(q => isObj(q) && (!stage1 || q.src === Y26));
+  startPracticeList(pickWeighted(objs, 30, true), stage1 ? '弱项强化 30 题（第一阶段 · 只抽样卷原题）' : '弱项强化 30 题');
 }
 function resumeExam() { SESSION = JSON.parse(localStorage.getItem('session')); go('exam-run'); }
 function persistSession() { localStorage.setItem('session', JSON.stringify(SESSION)); }
@@ -349,7 +426,7 @@ async function submitExam(force) {
   }
   score = Math.round(score * 10) / 10; objScore = Math.round(objScore * 10) / 10;
   S.result = { items, score, max, objScore, objMax };
-  P.history.push({ date: today(), title: S.title, score, max, objScore, objMax });
+  P.history.push({ date: today(), cfg: S.cfg, title: S.title, score, max, objScore, objMax });
   saveProgress();
   localStorage.removeItem('session');
   const wrongList = S.questions.map(x => BYID[x.id]).filter(q => q && q.type !== 'short' && items[q.id].frac < 0.999)
@@ -388,7 +465,7 @@ async function renderExamResult() {
   if (hasShort && S.submitted) watchGrading(S.id);
 }
 function reviewQ(q, a, r, i) {
-  const head = `<div class="qhead"><b>${i + 1}.</b><span class="tag">${TYPE[q.type]}</span><span class="tag">${KP[q.kp] || q.kp}</span><span class="tag ${q.src === '2025真题' ? 'y25' : 'new'}">${q.src}</span><span>${r ? r.got + ' / ' + r.pts + ' 分' : ''}</span></div>`;
+  const head = `<div class="qhead"><b>${i + 1}.</b><span class="tag">${TYPE[q.type]}</span><span class="tag">${KP[q.kp] || q.kp}</span><span class="tag ${srcCls(q)}">${q.src}</span><span>${r ? r.got + ' / ' + r.pts + ' 分' : ''}</span></div>`;
   if (q.type === 'short') {
     const k = r.extra;
     return `<div class="q" id="q-${i}">${head}<div class="stem">${esc(q.stem)}</div>
@@ -433,7 +510,7 @@ VIEWS.practice = () => {
     <div class="chips" id="kpchips">${counts(['judge', 'single', 'multi', 'short']).map(([k, n]) => `<span class="chip" data-k="${k}">${KP[k]} <small>${Math.round(kpAcc(k) * 100)}% · ${n}题</small></span>`).join('')}</div>
     <div class="row" style="margin-top:14px">
       <label>题型 <select id="ptype"><option value="obj">客观题（判断/单选/多选）</option><option value="judge">仅判断</option><option value="single">仅单选</option><option value="multi">仅多选</option><option value="short">仅简答</option></select></label>
-      <label>题源 <select id="psrc"><option value="all">全部</option><option value="y25">2025 真题</option><option value="new">新编</option></select></label>
+      <label>题源 <select id="psrc"><option value="all">全部（2026 样卷优先抽）</option><option value="y26" ${y26Stats().unlocked ? '' : 'selected'}>仅 2026 样卷</option><option value="y25">2025 真题</option><option value="new">新编</option></select></label>
       <label>数量 <input type="number" id="pn" value="20" min="1" max="200" style="width:80px"></label>
       <button class="btn pri" onclick="practiceFromForm()">开始练习</button>
       <button class="btn" onclick="startWeak()">让系统按短板出题</button>
@@ -449,8 +526,9 @@ function practiceFromForm() {
 function startPractice(kps, t = 'obj', src = 'all', n = 20) {
   const types = t === 'obj' ? ['judge', 'single', 'multi'] : [t];
   let pool = BANK.filter(q => types.includes(q.type) && (!kps.length || kps.includes(q.kp)));
-  if (src === 'y25') pool = pool.filter(q => q.src === '2025真题');
-  if (src === 'new') pool = pool.filter(q => q.src !== '2025真题');
+  if (src === 'y26') pool = pool.filter(q => q.src === Y26);
+  if (src === 'y25') pool = pool.filter(q => q.src === Y25);
+  if (src === 'new') pool = pool.filter(q => q.src !== Y25 && q.src !== Y26);
   if (!pool.length) return toast('没有符合条件的题目');
   startPracticeList(pickWeighted(pool, n, true), (kps.length ? kps.map(k => KP[k]).join('、') : '全部知识点') + ' · 专项');
 }
@@ -476,7 +554,7 @@ VIEWS['practice-run'] = () => {
   }
   $('#view').innerHTML = `<div class="row"><h1 style="margin:0">${esc(PR.title)}</h1><span class="spacer"></span><span class="label">第 ${PR.i + 1} / ${PR.list.length} 题 · 得分 ${Math.round(PR.got * 10) / 10}</span></div>
   <div class="bar" style="margin:10px 0 16px"><i style="width:${PR.i / PR.list.length * 100}%;background:var(--pri)"></i></div>
-  <div class="q"><div class="qhead"><span class="tag">${TYPE[q.type]}${q.type === 'multi' ? '（多选）' : ''}</span><span class="tag">${KP[q.kp] || q.kp}</span><span class="tag ${q.src === '2025真题' ? 'y25' : 'new'}">${q.src}${q.no ? ' 第' + q.no + '题' : ''}</span>${P.q[q.id] ? `<span class="label">做过 ${P.q[q.id].seen} 次</span>` : ''}</div>${body}</div>
+  <div class="q"><div class="qhead"><span class="tag">${TYPE[q.type]}${q.type === 'multi' ? '（多选）' : ''}</span><span class="tag">${KP[q.kp] || q.kp}</span><span class="tag ${srcCls(q)}">${q.src}${q.no ? ' 第' + q.no + '题' : ''}</span>${P.q[q.id] ? `<span class="label">做过 ${P.q[q.id].seen} 次</span>` : ''}</div>${body}</div>
   <div class="row">${PR.i > 0 ? '<button class="btn" onclick="PR.i--;VIEWS[\'practice-run\']()">上一题</button>' : ''}<span class="spacer"></span>
   <button class="btn" onclick="practiceSummary()">结束练习</button>${done ? `<button class="btn pri" id="nextBtn" onclick="PR.i++;VIEWS['practice-run']()">下一题 →</button>` : ''}</div>`;
   const box = $('#opts');
@@ -544,12 +622,13 @@ VIEWS.wrong = () => {
 /* ====== 实操 B/C ====== */
 let CS = null;
 VIEWS.cases = () => {
-  const cases = BANK.filter(q => q.type === 'case');
+  const order = c => c.src === Y26 ? 0 : c.src === Y25 ? 1 : 2;
+  const cases = BANK.filter(q => q.type === 'case').sort((a, b) => order(a) - order(b));
   const mods = ['B1.1', 'B1.2', 'B2', 'B3', 'B4', 'C'];
   const done = id => P.q[id] ? `<span class="tag ok">练过 ${P.q[id].seen} 次 · 预估 ${Math.round(P.q[id].score / P.q[id].seen * 100)}</span>` : '';
   $('#view').innerHTML = `<h1>实操 B / 综合评审 C</h1>
-  <div class="notice" style="margin-bottom:16px">下午场：B 120 分钟（业务分析 25 / 智能训练 30 / 系统设计 40 / 培训 5）+ C 30 分钟。限时作答 → 提交后看 checklist 自评与参考答案 → 在聊天中说“评卷”拿到评分与改进建议。建议在 Word/WPS 画流程图，这里用文字箭头写流程即可。</div>
-  ${mods.map(m => { const list = cases.filter(c => c.module === m); if (!list.length) return ''; return `<div class="card"><h3 style="margin-top:0">${m}</h3>${list.map(c => `<div class="list-item"><span class="tag ${c.src === '2025真题' ? 'y25' : 'new'}">${c.src}</span><b>${esc(c.title)}</b><span class="label">${c.minutes} 分钟</span>${done(c.id)}<span class="spacer"></span><button class="btn sm" onclick="viewCase('${c.id}')">看题与参考</button><button class="btn sm pri" onclick="startCase('${c.id}')">限时作答</button></div>`).join('')}</div>`; }).join('')}`;
+  <div class="notice" style="margin-bottom:16px">2026 下午场：B 120 分钟（B1.1 质检 25 分钟/15 分 · B1.2 会议室 20 分钟/10 分 · B2 冷链 25 分钟/30 分 · B3 能源 35 分钟/40 分 · B4 培训 15 分钟/5 分）+ C 30 分钟/100 分。<b>2026 样卷题排在每个模块第一位，必须反复练到能脱稿写完。</b>B1.2、B2 素材在 <code>2026样卷/</code>，参考 notebook 在 <code>备考输出/2026/notebooks/</code>。限时作答 → 提交后看 checklist 与参考答案 → AI 评卷。流程图建议在 Word/WPS 画，这里用文字箭头写即可。</div>
+  ${mods.map(m => { const list = cases.filter(c => c.module === m); if (!list.length) return ''; return `<div class="card"><h3 style="margin-top:0">${m}</h3>${list.map(c => `<div class="list-item"><span class="tag ${srcCls(c)}">${c.src}</span><b>${esc(c.title)}</b><span class="label">${c.minutes} 分钟</span>${done(c.id)}<span class="spacer"></span><button class="btn sm" onclick="viewCase('${c.id}')">看题与参考</button><button class="btn sm pri" onclick="startCase('${c.id}')">限时作答</button></div>`).join('')}</div>`; }).join('')}`;
 };
 function caseStemHtml(c) { return c.stemFormat === 'pre' ? `<div class="stem-pre">${esc(c.stem)}</div>` : `<div class="md stem-pre">${md(c.stem)}</div>`; }
 async function caseRefHtml(c) {
@@ -614,31 +693,40 @@ async function submitCase() {
   $('#refbox').innerHTML = await caseRefHtml(c);
 }
 
-/* ====== 2025 真题解析 ====== */
-let RV = { tab: 'judge', hide: false };
-VIEWS.review = (tab) => {
+/* ====== 真题 / 样卷解析 ====== */
+let RV = { tab: 'judge', hide: false, year: '2026' };
+const REVIEW_DOCS = {
+  '2026': ['2026/A理论参考答案.md', '2026/B1.1参考答案.md', '2026/B1.2参考答案.md', '2026/B2参考答案.md', '2026/B3参考答案.md', '2026/B4参考答案.md', '2026/C参考答案.md', '11-每日速记卡.md'],
+  '2025': ['01-评委拆解与学习路径.md', '02-A理论参考答案.md', '03-下午场总览-思考路径与学习方法.md', '04-B1.1参考答案与思考路径.md', '05-B1.2参考答案与思考路径.md', '06-B2参考答案与思考路径.md', '07-B3参考答案与思考路径.md', '08-B4参考答案与思考路径.md', '09-C参考答案与思考路径.md', '11-每日速记卡.md'],
+};
+VIEWS.review = (tab, year) => {
   if (tab) RV.tab = tab;
-  const y = BANK.filter(q => q.src === '2025真题');
-  const tabs = [['judge', '判断 14'], ['single', '单选 55'], ['multi', '多选 8'], ['short', '简答 6'], ['case', '实操 B/C'], ['docs', '备考文档']];
+  if (year) RV.year = year;
+  const SRCN = RV.year === '2026' ? Y26 : Y25;
+  const y = BANK.filter(q => q.src === SRCN);
+  const cnt = t => y.filter(q => q.type === t).length;
+  const tabs = [['judge', '判断 ' + cnt('judge')], ['single', '单选 ' + cnt('single')], ['multi', '多选 ' + cnt('multi')], ['short', '简答 ' + cnt('short')], ['case', '实操 B/C'], ['docs', '参考文档']];
+  const mtag = q => mastered(q) ? '<span class="tag ok">已掌握</span>' : P.wrong[q.id] ? '<span class="tag bad">错题本</span>' : '';
   let body = '';
   if (['judge', 'single', 'multi'].includes(RV.tab)) {
-    body = y.filter(q => q.type === RV.tab).sort((a, b) => a.no - b.no).map(q => `<div class="q"><div class="qhead"><b>${q.no}.</b><span class="tag">${KP[q.kp]}</span></div>
+    body = y.filter(q => q.type === RV.tab).sort((a, b) => a.no - b.no).map(q => `<div class="q"><div class="qhead"><b>${q.no}.</b><span class="tag">${KP[q.kp]}</span>${mtag(q)}</div>
       ${RV.hide ? `<div class="stem">${esc(q.stem)}</div>${q.options ? q.options.map((o, k) => `<div class="opt locked"><b>${LETTERS[k]}.</b><span>${esc(o)}</span></div>`).join('') : ''}
         <div class="blur" onclick="this.classList.remove('blur')"><div class="verdict ok">答案：${ansText(q, q.answer)}</div>${explainBox(q)}</div>`
         : objBody(q, q.answer, true).replace(/<div class="verdict[^>]*>.*?<\/div>/, `<div class="verdict ok">答案：${ansText(q, q.answer)}</div>`)}</div>`).join('');
   } else if (RV.tab === 'short') {
-    body = y.filter(q => q.type === 'short').sort((a, b) => a.no - b.no).map(q => `<div class="q"><div class="qhead"><b>简答 ${q.no}</b><span class="tag">${KP[q.kp]}</span><span>10 分</span></div>
+    body = y.filter(q => q.type === 'short').sort((a, b) => a.no - b.no).map(q => `<div class="q"><div class="qhead"><b>简答 ${q.no}</b><span class="tag">${KP[q.kp]}</span><span>${q.score || 10} 分</span></div>
       <div class="stem">${esc(q.stem)}</div><div ${RV.hide ? 'class="blur" onclick="this.classList.remove(\'blur\')"' : ''}>${shortFeedback(q, null)}</div></div>`).join('');
   } else if (RV.tab === 'case') {
-    body = y.filter(q => q.type === 'case').map(c => `<div class="card"><div class="row"><span class="tag y25">${c.module}</span><b>${esc(c.title)}</b><span class="label">${c.minutes} 分钟</span><span class="spacer"></span><button class="btn sm" onclick="viewCase('${c.id}')">题面 + 评分点 + 参考答案</button><button class="btn sm pri" onclick="startCase('${c.id}')">限时作答</button></div></div>`).join('');
+    body = y.filter(q => q.type === 'case').map(c => `<div class="card"><div class="row"><span class="tag ${srcCls(c)}">${c.module}</span><b>${esc(c.title)}</b><span class="label">${c.minutes} 分钟</span><span class="spacer"></span><button class="btn sm" onclick="viewCase('${c.id}')">题面 + 评分点 + 参考答案</button><button class="btn sm pri" onclick="startCase('${c.id}')">限时作答</button></div></div>`).join('');
   } else {
-    const docs = ['01-评委拆解与学习路径.md', '02-A理论参考答案.md', '03-下午场总览-思考路径与学习方法.md', '04-B1.1参考答案与思考路径.md', '05-B1.2参考答案与思考路径.md', '06-B2参考答案与思考路径.md', '07-B3参考答案与思考路径.md', '08-B4参考答案与思考路径.md', '09-C参考答案与思考路径.md', '11-每日速记卡.md'];
-    body = `<div class="card">${docs.map(d => `<div class="list-item"><span>📄 ${d}</span><span class="spacer"></span><button class="btn sm" onclick="showDoc('${d}')">打开</button></div>`).join('')}</div>`;
+    body = `<div class="card">${REVIEW_DOCS[RV.year].map(d => `<div class="list-item"><span>📄 ${d}</span><span class="spacer"></span><button class="btn sm" onclick="showDoc('${d}')">打开</button></div>`).join('')}</div>`;
   }
-  $('#view').innerHTML = `<div class="row"><h1 style="margin:0">2025 真题解析</h1><span class="spacer"></span><label><input type="checkbox" id="hideAns" ${RV.hide ? 'checked' : ''}> 遮挡答案自测（点击模糊区显示）</label></div>
-  <p class="label">官方未公布标准答案，以下为依据法规与专业知识整理的参考答案；每题附“答题思路”（快速判断/排除方法）。</p>
+  $('#view').innerHTML = `<div class="row"><h1 style="margin:0">真题 / 样卷解析</h1>
+    <div class="tabs" style="margin:0 0 0 12px">${[['2026', '2026 样卷（必考）'], ['2025', '2025 真题']].map(([k, t]) => `<a class="${RV.year === k ? 'on' : ''}" onclick="VIEWS.review(null,'${k}')">${t}</a>`).join('')}</div>
+    <span class="spacer"></span><label><input type="checkbox" id="hideAns" ${RV.hide ? 'checked' : ''}> 遮挡答案自测（点击模糊区显示）</label></div>
+  <p class="label">官方未公布标准答案，以下为依据法规与专业知识整理的参考答案；每题附“答题思路”（快速判断/排除方法）。${RV.year === '2026' ? '2026 评分框架：判断/单选每题 0.5 分，多选每题 1 分，简答每题 5 分。' : ''}</p>
   <div class="tabs">${tabs.map(([k, t]) => `<a class="${RV.tab === k ? 'on' : ''}" onclick="VIEWS.review('${k}')">${t}</a>`).join('')}
-  <span class="spacer"></span>${['judge', 'single', 'multi'].includes(RV.tab) ? `<button class="btn sm pri" onclick="startPracticeList(BANK.filter(q=>q.src==='2025真题'&&q.type==='${RV.tab}').sort((a,b)=>a.no-b.no),'2025真题 · ${TYPE[RV.tab]}顺序练')">按顺序刷这一类</button>` : ''}</div>${body}`;
+  <span class="spacer"></span>${['judge', 'single', 'multi'].includes(RV.tab) ? `<button class="btn sm pri" onclick="startPracticeList(BANK.filter(q=>q.src==='${SRCN}'&&q.type==='${RV.tab}').sort((a,b)=>a.no-b.no),'${SRCN} · ${TYPE[RV.tab]}顺序练')">按顺序刷这一类</button>` : ''}</div>${body}`;
   $('#hideAns').onchange = e => { RV.hide = e.target.checked; VIEWS.review(); };
   if (RV.tab === 'short') loadRefs();
 };

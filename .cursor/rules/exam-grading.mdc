@@ -7,11 +7,18 @@ alwaysApply: true
 
 系统位于 `exam-app/`（启动：根目录 `启动刷题系统.bat`，地址 http://127.0.0.1:8848/）。用户备考“人工智能训练师二级（技师）”，A 理论 / B 实操 / C 综合评审。
 
+**2026 样卷是必考题，必须重点掌握**：题库 `data/bank/y2026_sample.json`（src="2026样卷"，id 前缀 `Y26-`），原件与素材在 `2026样卷/`，参考答案在 `备考输出/2026/`。2026 评分框架：判断/单选每题 0.5 分，多选每题 1 分，简答每题 5 分；B1.1 15 分、B1.2 10 分、B2 30 分、B3 40 分、B4 5 分，C 100 分。出卷、追加新题时以 2026 样卷的考点和题型为主（同考点变式题），2025 真题次之。
+
+**两阶段（用户要求）**：
+- **第一阶段·原题熟练**（当前）：只练样卷原题，**不新编题、不出变式题**。评卷时第 6 步改为：列出本次丢分的样卷原题（qid + 正确写法要点），作为下次必练清单。
+- **熟练标准**（看板“2026 样卷 · 原题熟练”卡片实时显示，全部达标后 `progress.json` 的 `settings.stage2At` 会写入达标日期）：客观题 77 道每题连续答对 ≥3 次；最近 2 次打乱卷（cfg 为 `y2026all`/`y2026obj`）客观题满分；简答 6 道最近一次 ≥90%；实操/综合 6 道最近一次 ≥85 分。
+- **第二阶段·变式**：达标后（或用户明确说“出变式题”）才按样卷考点出变式题：理论题顶替未公开的约 35 道（判断 6、单选 24、多选 3、简答 2 的比例），实操/综合按样卷结构换业务场景。
+
 服务端已集成自动评卷（`exam-app/grader.py`，模型配置在 `exam-app/config.json`），交卷后会自动写 `feedback/`。
 
 ## 用户说“评卷”时
 1. 列出 `exam-app/submissions/*.json`。没有同名 feedback 的答卷按下述流程评；已有服务端 feedback（含 `"grader"` 字段）的，只需复核其合理性，明显打分失当时重写，否则保留。
-2. 逐份阅读：`subjective[]` 是主观题（qid、stem、answer、autoScore 关键词预估、rubricHits），`wrong[]` 是客观题错题，`kpSummary` 是知识点得分。题目全文、rubric/checklist、参考答案在 `exam-app/data/bank/*.json`（按 qid 查），2025 真题参考答案在 `备考输出/02~09`。
+2. 逐份阅读：`subjective[]` 是主观题（qid、stem、answer、autoScore 关键词预估、rubricHits），`wrong[]` 是客观题错题，`kpSummary` 是知识点得分。题目全文、rubric/checklist、参考答案在 `exam-app/data/bank/*.json`（按 qid 查），2026 样卷参考答案在 `备考输出/2026/`，2025 真题参考答案在 `备考输出/02~09`。2026 样卷题答错或主观题低于 80% 的，在汇报中单独列出，作为下一轮必练。
 3. 按评委标准给每道主观题打分（对照 rubric/checklist 的得分点，看结构、要点覆盖、量化指标、是否满足题面硬性要求），评语要具体指出：得分点、缺漏点、一句可直接誊抄的改进写法。
 4. 写入 `exam-app/feedback/<同名>.json`，格式：
 ```json
@@ -27,7 +34,7 @@ alwaysApply: true
 ```
    `total` 对模拟卷 = 客观题得分 objScore + 主观题 AI 评分之和；`items[].autoScore` 照抄答卷中的预估分（页面靠它修正掌握度）。
 5. 读取 `exam-app/data/progress.json`（`kp` 为各知识点 seen/score，`wrong` 为错题本），结合本次结果总结短板。
-6. 针对最弱的 1–3 个知识点新编 10–20 道题，写入 `exam-app/data/bank/ai_round<N>_<日期>.json`（格式与 `new_*.json` 一致，id 用 `AI<N>-<kp>-<序号>`，src 填 "AI追加"），再运行 `python exam-app/tools/validate.py` 确认 0 错误。页面刷新后自动加载，弱项强化会优先抽到。
+6. 针对最弱的 1–3 个知识点新编 10–20 道题（优先出 2026 样卷同考点的变式题），写入 `exam-app/data/bank/ai_round<N>_<日期>.json`（格式与 `new_*.json` 一致，id 用 `AI<N>-<kp>-<序号>`，src 填 "AI追加"），再运行 `python exam-app/tools/validate.py` 确认 0 错误。页面刷新后自动加载，弱项强化会优先抽到。
 7. 在聊天中用中文简要汇报：各份得分、主要问题、新增题目数量与针对的知识点、下一步练习建议。
 
 知识点代码：ethics law office security bpm product pm training ml dl algo data llm aisys。
