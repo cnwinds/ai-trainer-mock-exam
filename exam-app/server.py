@@ -93,7 +93,7 @@ class H(SimpleHTTPRequestHandler):
             sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "public, max-age=604800" if self.path.startswith("/vendor/") else "no-store")
         super().end_headers()
 
     def _authed(self):

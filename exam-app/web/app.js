@@ -822,6 +822,33 @@ async function showSubmission(id) {
   if (!f && (s.subjective || []).length) watchGrading(id);
 }
 
+/* ====== Mermaid 流程图：任何位置渲染出的 ```mermaid 代码块都自动转成图形 ====== */
+let mmSeq = 0, mmPending = false;
+const MM_SEL = 'pre > code.language-mermaid:not([data-mm])';
+if (window.mermaid) mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default', htmlLabels: false, flowchart: { useMaxWidth: true, htmlLabels: false, wrappingWidth: 260 } });
+async function renderMermaid() {
+  mmPending = false;
+  const list = [...document.querySelectorAll(MM_SEL)];
+  list.forEach(c => c.dataset.mm = '1');
+  for (const code of list) {
+    if (!code.isConnected) continue;
+    const src = code.textContent, box = document.createElement('div');
+    box.className = 'mermaid-box';
+    code.parentElement.replaceWith(box);
+    const id = 'mm' + (++mmSeq);
+    try {
+      box.innerHTML = (await mermaid.render(id, src)).svg;
+    } catch (e) {
+      document.getElementById('d' + id)?.remove();
+      box.innerHTML = `<div class="label">流程图渲染失败：${esc(String(e.message || e).split('\n')[0])}</div>`;
+    }
+    box.insertAdjacentHTML('beforeend', `<details><summary>查看流程图源码</summary><pre>${esc(src)}</pre></details>`);
+  }
+}
+if (window.mermaid) new MutationObserver(() => {
+  if (!mmPending && document.querySelector(MM_SEL)) { mmPending = true; requestAnimationFrame(renderMermaid); }
+}).observe(document.body, { childList: true, subtree: true });
+
 /* ====== 启动 ====== */
 (async function boot() {
   $('#view').innerHTML = '<div class="card">题库加载中…</div>';
