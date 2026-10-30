@@ -106,6 +106,15 @@ textarea.big{min-height:520px}
 .list-item:last-child{border-bottom:none}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
 .modal-card{background:#fff;border-radius:12px;max-width:980px;width:100%;padding:24px 28px;position:relative}
+.modal.wide{padding:12px;align-items:stretch}
+.modal.wide .modal-card{max-width:1680px;height:calc(100vh - 24px);display:flex;flex-direction:column;padding:16px 20px}
+.modal.wide #modal-body{flex:1;min-height:0;display:flex;flex-direction:column}
+.split{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.split-col{overflow:auto;min-height:0;padding-right:6px}
+.split-col .stem-pre{max-height:none}
+.md.stem-pre{white-space:normal}
+.split-head{position:sticky;top:0;z-index:2;background:#fff;display:flex;align-items:center;gap:6px;font-weight:600;padding:4px 0 8px;border-bottom:1px solid var(--line);margin-bottom:10px}
+@media (max-width:900px){.split{grid-template-columns:1fr}.modal.wide .modal-card{height:auto}.split-col{overflow:visible}}
 .modal-close{position:absolute;right:14px;top:10px;border:none;background:none;font-size:26px;cursor:pointer;color:var(--muted)}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 20px;border-radius:8px;z-index:60}
 .plan li{margin:4px 0}

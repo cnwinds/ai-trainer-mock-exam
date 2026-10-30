@@ -193,7 +193,11 @@ function go(view, ...args) {
   VIEWS[view](...args);
 }
 document.addEventListener('click', e => { const a = e.target.closest('#nav a'); if (a) go(a.dataset.view); });
-function openModal(html) { $('#modal-body').innerHTML = html; $('#modal').classList.remove('hidden'); }
+function openModal(html, wide = false) {
+  $('#modal-body').innerHTML = html;
+  $('#modal').classList.toggle('wide', wide);
+  $('#modal').classList.remove('hidden');
+}
 function closeModal() { $('#modal').classList.add('hidden'); }
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
 
@@ -638,13 +642,20 @@ async function caseRefHtml(c) {
 }
 async function viewCase(id) {
   const c = BYID[id];
-  openModal(`<h2 style="margin-top:0">${esc(c.title)} <span class="tag">${c.module}</span></h2>${caseStemHtml(c)}
-    <h3>评分要点 checklist</h3>${checklistTable(c)}
-    ${c.thinking ? `<h3>答题思路</h3><div class="explain md">${md(c.thinking)}</div>` : ''}
-    ${c.templateDoc ? `<h3>答题卷模板</h3><div class="md" id="tplbox">加载中…</div>` : ''}
-    <h3>参考答案</h3><div class="md" id="refbox">加载中…</div>`);
-  $('#refbox').innerHTML = await caseRefHtml(c);
-  if (c.templateDoc) $('#tplbox').innerHTML = md(await loadDoc(c.templateDoc));
+  const jump = (sel, t) => `<a class="btn sm" onclick="document.getElementById('${sel}').scrollIntoView({behavior:'smooth'})">${t}</a>`;
+  openModal(`<h2 style="margin-top:0">${esc(c.title)} <span class="tag ${srcCls(c)}">${c.module}</span></h2>
+  <div class="split">
+    <div class="split-col"><div class="split-head">📄 题目</div>${caseStemHtml(c)}</div>
+    <div class="split-col" id="case-right">
+      <div class="split-head">✅ 参考答案 <span class="spacer"></span>${jump('sec-ref', '参考答案')}${jump('sec-ck', '评分要点')}${c.thinking ? jump('sec-th', '答题思路') : ''}${c.templateDoc ? jump('sec-tpl', '模板') : ''}</div>
+      <div id="sec-ref" class="md">加载中…</div>
+      <h3 id="sec-ck">评分要点 checklist</h3>${checklistTable(c)}
+      ${c.thinking ? `<h3 id="sec-th">答题思路</h3><div class="explain md">${md(c.thinking)}</div>` : ''}
+      ${c.templateDoc ? `<h3 id="sec-tpl">答题卷模板</h3><div class="md" id="sec-tplbox">加载中…</div>` : ''}
+    </div>
+  </div>`, true);
+  $('#sec-ref').innerHTML = await caseRefHtml(c);
+  if (c.templateDoc) $('#sec-tplbox').innerHTML = md(await loadDoc(c.templateDoc));
 }
 function checklistTable(c, k) {
   const rows = k ? k.detail : c.checklist.map(x => ({ point: x.item, score: x.score, hits: [] }));
@@ -688,7 +699,7 @@ async function submitCase() {
   <div class="card"><h3 style="margin-top:0">评分要点对照</h3>${checklistTable(c, k)}</div>
   <div class="card"><h3 style="margin-top:0">你的作答</h3><div class="stem-pre">${esc(CS.answer)}</div></div>
   ${c.thinking ? `<div class="card"><h3 style="margin-top:0">答题思路</h3><div class="md">${md(c.thinking)}</div></div>` : ''}
-  <div class="card"><h3 style="margin-top:0">参考答案</h3><div class="md" id="refbox">加载中…</div></div>`;
+  <div class="card"><div class="row"><h3 style="margin:0">参考答案</h3><span class="spacer"></span><button class="btn sm pri" onclick="viewCase('${c.id}')">左右对照：题目 | 参考答案</button></div><div class="md" id="refbox">加载中…</div></div>`;
   if (ok) watchGrading(sid);
   $('#refbox').innerHTML = await caseRefHtml(c);
 }
