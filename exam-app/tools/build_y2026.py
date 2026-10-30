@@ -371,7 +371,7 @@ def main():
     for no, kp, diff, stem, rubric, ref, th in SHORT:
         L += [f"### 简答 {no}", "", f"**题目**：{stem}", "", "**评分要点**：", ""]
         L += [f"- {p}（{s:g} 分）" for p, s, _ in rubric]
-        L += ["", "**参考答案**：", "", ref.strip(), "", f"**答题思路**：{th}", ""]
+        L += ["", "**参考答案**：", "", ref.strip().replace("\n", "\n\n"), "", f"**答题思路**：{th}", ""]
     DOC.parent.mkdir(parents=True, exist_ok=True)
     DOC.write_text("\n".join(L), encoding="utf-8")
     print("wrote", len(res), "items ->", OUT.name, "+", DOC.name)

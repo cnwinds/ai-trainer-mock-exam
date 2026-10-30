@@ -44,7 +44,9 @@ let BANK = [], BYID = {}, P = null, SESSION = null, TIMER = null, CONF = { llm: 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const md = s => (window.marked ? marked.parse(String(s || '')) : '<pre>' + esc(s) + '</pre>');
+// 题库里大量“4~8 周”“24~27℃”这类区间写法，marked 会把成对的单个 ~ 当成删除线；代码块和行内代码之外的单个 ~ 转成实体
+const tildeSafe = s => s.split(/(```[\s\S]*?```|`[^`\n]*`)/g).map((p, i) => i % 2 ? p : p.replace(/(^|[^~])~(?!~)/g, '$1&#126;')).join('');
+const md = s => (window.marked ? marked.parse(tildeSafe(String(s || ''))) : '<pre>' + esc(s) + '</pre>');
 const today = () => new Date().toLocaleDateString('sv-SE');
 const nowStr = () => new Date().toLocaleString('sv-SE').replace(' ', 'T');
 const fmtTime = s => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0'); };
