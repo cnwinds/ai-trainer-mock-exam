@@ -367,9 +367,8 @@ VIEWS['exam-run'] = () => {
     for (const [x, i] of groups[t]) html += examQ(BYID[x.id], i, x.pts);
   }
   html += `<div class="row" style="margin:20px 0 60px"><button class="btn pri" onclick="submitExam()">交卷</button></div></div>
-  <div class="side card"><div class="label" style="margin-bottom:6px">答题卡（橙框=标记）</div><div class="navgrid" id="navgrid"></div>
-  <div style="margin-top:14px" class="label" id="progressTxt"></div>
-  <button class="btn pri" style="width:100%;margin-top:10px" onclick="submitExam()">交卷</button></div></div>`;
+  <div class="side card">${sideBar(true)}<div class="label side-title">答题卡（橙框=标记）</div><div class="navgrid" id="navgrid"></div>
+  <button class="btn pri side-submit-full" onclick="submitExam()">交卷</button></div></div>`;
   $('#view').innerHTML = html;
   bindExamInputs();
   refreshNav();
@@ -401,6 +400,10 @@ function bindExamInputs() {
   };
   $('#view').oninput = e => { if (e.target.matches('textarea[data-q]')) { SESSION.answers[e.target.dataset.q] = e.target.value; persistSession(); refreshNav(); } };
 }
+// 手机上答题卡收成底部浮条：进度 + 展开题号 + 交卷；桌面端只显示进度
+const sideBar = withSubmit => `<div class="side-bar"><span class="label" id="progressTxt"></span><span class="spacer"></span>
+  <button class="btn sm side-toggle" onclick="this.closest('.side').classList.toggle('open')">答题卡</button>
+  ${withSubmit ? '<button class="btn sm pri side-toggle" onclick="submitExam()">交卷</button>' : ''}</div>`;
 function refreshNav() {
   const g = $('#navgrid'); if (!g) return;
   let done = 0;
@@ -409,7 +412,7 @@ function refreshNav() {
     let cls = a ? 'done' : '';
     if (SESSION.result) { const r = SESSION.result.items[x.id]; cls = r.frac >= 0.999 ? 'r-ok' : r.frac > 0 ? 'r-part' : 'r-bad'; }
     if (SESSION.marks[x.id]) cls += ' mark';
-    return `<a class="${cls}" onclick="document.getElementById('q-${i}').scrollIntoView({behavior:'smooth'})">${i + 1}</a>`;
+    return `<a class="${cls}" onclick="this.closest('.side').classList.remove('open');document.getElementById('q-${i}').scrollIntoView({behavior:'smooth'})">${i + 1}</a>`;
   }).join('');
   const pt = $('#progressTxt'); if (pt) pt.textContent = SESSION.result ? `得分 ${SESSION.result.score} / ${SESSION.result.max}` : `已答 ${done} / ${SESSION.questions.length}`;
 }
@@ -465,7 +468,7 @@ async function renderExamResult() {
     html += `<div class="secthead">${TYPE[t]}</div>`;
     for (const [q, i] of groups[t]) html += reviewQ(q, S.answers[q.id] || '', R.items[q.id], i);
   }
-  html += `</div><div class="side card"><div class="label" style="margin-bottom:6px">绿=对 橙=部分 红=错</div><div class="navgrid" id="navgrid"></div><div class="label" id="progressTxt" style="margin-top:10px"></div></div></div>`;
+  html += `</div><div class="side card">${sideBar(false)}<div class="label side-title">绿=对 橙=部分 红=错</div><div class="navgrid" id="navgrid"></div></div></div>`;
   $('#view').innerHTML = html; $('#view').onclick = null; $('#view').oninput = null;
   refreshNav();
   loadRefs();
@@ -684,7 +687,9 @@ async function viewCase(id) {
   const c = BYID[id];
   const jump = (sel, t) => `<a class="btn sm" onclick="document.getElementById('${sel}').scrollIntoView({behavior:'smooth'})">${t}</a>`;
   openModal(`<h2 style="margin-top:0">${esc(c.title)} <span class="tag ${srcCls(c)}">${c.module}</span></h2>
-  <div class="split">
+  <div class="split-tabs" onclick="const a = event.target.closest('a'); if (!a) return; this.querySelectorAll('a').forEach(x => x.classList.toggle('on', x === a)); this.nextElementSibling.className = 'split show-' + a.dataset.t; $('#modal').scrollTop = 0">
+    <a class="on" data-t="r">✅ 参考答案</a><a data-t="l">📄 题目</a></div>
+  <div class="split show-r">
     <div class="split-col"><div class="split-head">📄 题目</div>${caseStemHtml(c)}</div>
     <div class="split-col" id="case-right">
       <div class="split-head">✅ 参考答案 <span class="spacer"></span>${c.points ? jump('sec-card', '答题卡') : ''}${jump('sec-ck', '评分要点')}${c.thinking ? jump('sec-th', '答题思路') : ''}${jump('sec-full', c.points ? '完整版' : '参考答案')}${c.templateDoc ? jump('sec-tpl', '模板') : ''}</div>
