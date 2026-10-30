@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """2026 样卷 B1.1 / B1.2 / B2 / B3 / B4 / C 题面与评分 checklist（满分统一按 100 记，括号内为考试实际分值）。"""
 
+from y2026_guides import CASE_GUIDES
+
 SRC = "2026样卷"
 
 
@@ -214,9 +216,13 @@ C_STEM = """**试题代码 C　大型场馆智能客流预测与疏导系统产�
 
 
 def case(module, kp, minutes, title, stem, checklist, thinking):
-    return {"id": f"Y26-{module}", "type": "case", "module": module, "kp": kp, "src": SRC, "minutes": minutes, "score": 100,
-            "title": title, "stem": stem, "checklist": checklist,
-            "referenceDoc": f"2026/{module}参考答案.md", "thinking": thinking}
+    c = {"id": f"Y26-{module}", "type": "case", "module": module, "kp": kp, "src": SRC, "minutes": minutes, "score": 100,
+         "title": title, "stem": stem, "checklist": checklist,
+         "referenceDoc": f"2026/{module}参考答案.md", "thinking": thinking}
+    g = CASE_GUIDES.get(module)
+    if g:
+        c.update(hook=g["hook"], timeplan=g["timeplan"], points=g["points"], terms=[{"t": t, "d": d} for t, d in g["terms"]])
+    return c
 
 
 CASES = [

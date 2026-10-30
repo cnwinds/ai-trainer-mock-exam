@@ -90,6 +90,7 @@ function initProgress(p) {
   p.history = p.history || [];
   p.appliedFeedback = p.appliedFeedback || [];
   p.fbApplied = p.fbApplied || {};
+  p.recite = p.recite || {};
   return p;
 }
 function kpAcc(kp) { const s = P.kp[kp]; return s ? (s.score + 1) / (s.seen + 2) : 0.5; }
@@ -490,12 +491,49 @@ function objBody(q, a, showResult) {
 }
 const explainBox = q => `<div class="explain"><div>${esc(q.explain)}</div><div class="think">💡 ${esc(q.thinking)}</div></div>`;
 function shortFeedback(q, k) {
-  return `<h3>关键词预估：${k ? k.got + ' / ' + k.max : '-'}</h3>
-    <table class="rubric"><tr><th>得分点</th><th>分值</th><th>命中关键词</th></tr>
-    ${(k ? k.detail : q.rubric.map(x => ({ point: x.point, score: x.score, hits: [] }))).map(d => `<tr class="${d.hits.length ? 'hit' : 'miss'}"><td>${d.hits.length ? '✓' : '✗'} ${esc(d.point)}</td><td>${k ? d.got + '/' : ''}${d.score}</td><td>${esc(d.hits.join('、')) || '—'}</td></tr>`).join('')}
-    </table>
-    <h3>答题思路</h3><div class="explain md">${md(q.thinking)}</div>
-    <h3>参考答案</h3><div class="md ref" data-qid="${q.id}">${q.reference ? md(q.reference) : '加载中…'}</div>`;
+  const table = `<h3>${k ? `关键词预估：${k.got} / ${k.max}` : '评分要点'}</h3>
+    <table class="rubric"><tr><th>得分点</th><th>分值</th>${k ? '<th>命中关键词</th>' : ''}</tr>
+    ${(k ? k.detail : q.rubric.map(x => ({ point: x.point, score: x.score, hits: [] }))).map(d => `<tr class="${k ? (d.hits.length ? 'hit' : 'miss') : ''}"><td>${k ? (d.hits.length ? '✓ ' : '✗ ') : ''}${esc(d.point)}</td><td>${k ? d.got + '/' : ''}${d.score}</td>${k ? `<td>${esc(d.hits.join('、')) || '—'}</td>` : ''}</tr>`).join('')}
+    </table>`;
+  const think = `<h3>答题思路</h3><div class="explain md">${md(q.thinking)}</div>`;
+  if (q.points) return pointsHtml(q) + think + table;
+  return table + think + `<h3>参考答案</h3><div class="md ref" data-qid="${q.id}">${q.reference ? md(q.reference) : '加载中…'}</div>`;
+}
+
+/* ====== 结构化参考答案：考场速写版为主，每行可展开理解，支持背诵模式 ====== */
+const reciteOn = () => localStorage.getItem('reciteMode') === '1';
+function pointsHtml(q) {
+  const rec = P.recite[q.id] || {};
+  const ok = q.points.filter((_, i) => rec[i] === 1).length;
+  const big = q.type === 'case';
+  const recBtns = i => `<span class="pt-rec"><a onclick="markRecite('${q.id}',${i},1,this)">✓ 记住了</a><a onclick="markRecite('${q.id}',${i},0,this)">✗ 没记住</a></span>`;
+  const more = `<a class="pt-more" onclick="this.closest('li').classList.toggle('open')">为什么？</a>`;
+  const explain = p => `<div class="pt-explain md">${md(`**怎么做**：${p.how}\n\n**为什么**：${p.why}${p.tip ? `\n\n**小提醒**：${p.tip}` : ''}`)}</div>`;
+  const item = (p, i) => big
+    ? `<div class="pt-line"><b class="pt-t">${esc(p.t)}</b><span class="tag">占 ${p.score}%</span><span class="tag">建议 ${p.min} 分钟</span><span class="spacer"></span>${recBtns(i)}${more}</div>
+       <div class="pt-quick block md" onclick="this.classList.add('shown')">${md(p.quick)}</div>${explain(p)}`
+    : `<div class="pt-line"><b class="pt-t">${esc(p.t)}：</b><span class="pt-quick" onclick="this.classList.add('shown')">${esc(p.quick)}</span>${recBtns(i)}${more}</div>${explain(p)}`;
+  return `<div class="pts ${big ? 'big' : ''} ${reciteOn() ? 'recite' : ''}" data-qid="${q.id}">
+    <div class="pts-head"><b>✍️ ${big ? '答题卡 · 考场速写版' : '考场速写版'}</b><span class="label">${big ? '按小问拆开，考场照着写' : '每点一行，考场直接誊抄'}</span><span class="spacer"></span>
+      <span class="label pts-count">背熟 ${ok} / ${q.points.length}</span>
+      <button class="btn sm ${reciteOn() ? 'pri' : ''}" onclick="toggleRecite()">${reciteOn() ? '退出背诵模式' : '背诵模式'}</button>
+      <button class="btn sm" onclick="this.closest('.pts').querySelectorAll('.pts-list > li').forEach(li => li.classList.toggle('open', !this.dataset.open)); this.dataset.open = this.dataset.open ? '' : '1'; this.textContent = this.dataset.open ? '收起全部理解' : '展开全部理解'">展开全部理解</button></div>
+    ${q.hook ? `<div class="pts-hook">🔑 ${esc(q.hook)}</div>` : ''}
+    ${q.timeplan ? `<div class="pts-hook">⏱ ${esc(q.timeplan)}</div>` : ''}
+    ${q.terms?.length ? `<details class="pts-terms"><summary>📖 本题术语（${q.terms.length} 个，基础薄弱先看这里）</summary><dl>${q.terms.map(x => `<dt>${esc(x.t)}</dt><dd>${esc(x.d)}</dd>`).join('')}</dl></details>` : ''}
+    ${reciteOn() ? `<div class="label">背诵模式：先看标题默背${big ? '或在纸上默写' : ''}，再点模糊处对照，然后标记“记住了 / 没记住”。</div>` : ''}
+    <ol class="pts-list">${q.points.map((p, i) => `<li class="${rec[i] === 1 ? 'ok' : rec[i] === 0 ? 'bad' : ''}">${item(p, i)}</li>`).join('')}</ol></div>`;
+}
+function toggleRecite() {
+  localStorage.setItem('reciteMode', reciteOn() ? '0' : '1');
+  document.querySelectorAll('.pts[data-qid]').forEach(el => { el.outerHTML = pointsHtml(BYID[el.dataset.qid]); });
+}
+function markRecite(qid, i, v, a) {
+  (P.recite[qid] = P.recite[qid] || {})[i] = v;
+  saveProgress();
+  const box = a.closest('.pts'), q = BYID[qid];
+  a.closest('li').className = v ? 'ok' : 'bad';
+  box.querySelector('.pts-count').textContent = `背熟 ${q.points.filter((_, j) => P.recite[qid][j] === 1).length} / ${q.points.length}`;
 }
 async function loadRefs() {
   for (const el of document.querySelectorAll('.ref[data-qid]')) {
@@ -649,10 +687,12 @@ async function viewCase(id) {
   <div class="split">
     <div class="split-col"><div class="split-head">📄 题目</div>${caseStemHtml(c)}</div>
     <div class="split-col" id="case-right">
-      <div class="split-head">✅ 参考答案 <span class="spacer"></span>${jump('sec-ref', '参考答案')}${jump('sec-ck', '评分要点')}${c.thinking ? jump('sec-th', '答题思路') : ''}${c.templateDoc ? jump('sec-tpl', '模板') : ''}</div>
-      <div id="sec-ref" class="md">加载中…</div>
+      <div class="split-head">✅ 参考答案 <span class="spacer"></span>${c.points ? jump('sec-card', '答题卡') : ''}${jump('sec-ck', '评分要点')}${c.thinking ? jump('sec-th', '答题思路') : ''}${jump('sec-full', c.points ? '完整版' : '参考答案')}${c.templateDoc ? jump('sec-tpl', '模板') : ''}</div>
+      ${c.points ? `<div id="sec-card">${pointsHtml(c)}</div>` : ''}
       <h3 id="sec-ck">评分要点 checklist</h3>${checklistTable(c)}
       ${c.thinking ? `<h3 id="sec-th">答题思路</h3><div class="explain md">${md(c.thinking)}</div>` : ''}
+      ${c.points ? `<details id="sec-full" class="full-ref"><summary>完整参考答案（文档版，备查）</summary><div id="sec-ref" class="md">加载中…</div></details>`
+        : `<h3 id="sec-full">参考答案</h3><div id="sec-ref" class="md">加载中…</div>`}
       ${c.templateDoc ? `<h3 id="sec-tpl">答题卷模板</h3><div class="md" id="sec-tplbox">加载中…</div>` : ''}
     </div>
   </div>`, true);
@@ -700,6 +740,7 @@ async function submitCase() {
   </div>${ok ? gradingBox(sid) : '<div class="notice">⚠️ 提交失败</div>'}
   <div class="card"><h3 style="margin-top:0">评分要点对照</h3>${checklistTable(c, k)}</div>
   <div class="card"><h3 style="margin-top:0">你的作答</h3><div class="stem-pre">${esc(CS.answer)}</div></div>
+  ${c.points ? `<div class="card">${pointsHtml(c)}</div>` : ''}
   ${c.thinking ? `<div class="card"><h3 style="margin-top:0">答题思路</h3><div class="md">${md(c.thinking)}</div></div>` : ''}
   <div class="card"><div class="row"><h3 style="margin:0">参考答案</h3><span class="spacer"></span><button class="btn sm pri" onclick="viewCase('${c.id}')">左右对照：题目 | 参考答案</button></div><div class="md" id="refbox">加载中…</div></div>`;
   if (ok) watchGrading(sid);
@@ -838,7 +879,8 @@ async function showSubmission(id) {
 /* ====== Mermaid 流程图：任何位置渲染出的 ```mermaid 代码块都自动转成图形 ====== */
 let mmSeq = 0, mmPending = false;
 const MM_SEL = 'pre > code.language-mermaid:not([data-mm])';
-if (window.mermaid) mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default', htmlLabels: false, flowchart: { useMaxWidth: true, htmlLabels: false, wrappingWidth: 260 } });
+if (window.mermaid) mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default', htmlLabels: false,
+  fontFamily: '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC",sans-serif', flowchart: { useMaxWidth: true, htmlLabels: false, wrappingWidth: 260 } });
 async function renderMermaid() {
   mmPending = false;
   const list = [...document.querySelectorAll(MM_SEL)];

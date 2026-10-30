@@ -2,9 +2,12 @@
   --bg:#f5f6fa; --card:#fff; --ink:#1f2430; --muted:#6b7280; --line:#e5e7eb;
   --pri:#3056d3; --pri-weak:#e8edff; --ok:#16a34a; --ok-weak:#e7f7ec; --bad:#dc2626; --bad-weak:#fdecec;
   --warn:#d97706; --warn-weak:#fff4e0;
+  --font-ui:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  --font-read:"LXGW WenKai Screen",var(--font-ui);
+  --font-mono:"Cascadia Mono",Consolas,"Microsoft YaHei UI",monospace;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 var(--font-ui)}
 a{color:var(--pri);cursor:pointer}
 .hidden{display:none!important}
 .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:20px;padding:0 24px;height:56px;background:#162447;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15)}
@@ -44,6 +47,35 @@ h3{font-size:16px;margin:16px 0 8px}
 .mermaid-box svg{max-width:100%;height:auto}
 .mermaid-box details{text-align:left;margin-top:6px;font-size:12px;color:var(--muted)}
 .mermaid-box details pre{white-space:pre-wrap}
+.pts{border:2px solid #bfdbfe;background:#f8fbff;border-radius:10px;padding:12px 16px;margin:10px 0}
+.pts-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pts-hook{font-size:13px;color:#1d4ed8;margin:8px 0 2px}
+.pts-list{margin:8px 0 0;padding-left:24px}
+.pts-list>li{padding:7px 0;border-bottom:1px dashed var(--line)}
+.pts-list>li:last-child{border-bottom:none}
+.pt-line{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.pt-t{white-space:nowrap}
+.pt-quick{flex:1;min-width:220px}
+.pts.recite .pt-quick:not(.shown){filter:blur(6px);cursor:pointer;user-select:none}
+.pt-rec{display:none;gap:10px}
+.pts.recite .pt-rec{display:inline-flex}
+.pt-rec a,.pt-more{font-size:12px;cursor:pointer;color:var(--pri);white-space:nowrap}
+.pts-list>li.ok .pt-t{color:var(--ok)}
+.pts-list>li.bad .pt-t{color:var(--bad)}
+.pt-explain{display:none;margin:8px 0 2px;padding:8px 12px;background:#fff;border-left:3px solid #93c5fd;border-radius:4px;font-size:13.5px}
+.pts-list>li.open>.pt-explain{display:block}
+.pt-explain p{margin:4px 0}
+.pts-terms{margin:8px 0 2px;font-size:13px}
+.pts-terms summary{cursor:pointer;color:#1d4ed8}
+.pts-terms dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:8px 0 0;background:#fff;border:1px solid var(--line);border-radius:6px;padding:8px 12px}
+.pts-terms dt{font-weight:600;color:#0f172a}
+.pts-terms dd{margin:0;color:#334155}
+.pts.big .pts-list{padding-left:20px}
+.pts.big .pts-list>li{padding:10px 0}
+.pt-quick.block{display:block;width:100%;margin-top:6px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 12px;font-size:13.5px}
+.pt-quick.block table{font-size:13px}
+.full-ref{margin-top:14px}
+.full-ref>summary{cursor:pointer;font-weight:600;padding:6px 0}
 .gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 16px;margin-top:12px;font-size:13px;color:var(--muted)}
 .gates>div{display:flex;gap:6px}.gates b{margin-left:auto;color:#334155}.gates .ok{color:var(--ok)}
 .tag.new{background:#e8f5ff;color:#0369a1}
@@ -126,3 +158,15 @@ textarea.big{min-height:520px}
 .tabs a.on{background:var(--pri);color:#fff;border-color:var(--pri)}
 .blur{filter:blur(5px);cursor:pointer;transition:.2s}
 .blur:hover{filter:blur(3px)}
+
+/* ====== 阅读排版：题干、选项、解析、参考答案、答题卡、作答框用文楷；按钮、标签、表头等界面控件保持黑体；放在文件末尾以覆盖前面的字号设置 ====== */
+.md,.stem,.stem-pre,.explain,.opt span,.pts,.pt-explain,.pt-quick.block,.rubric td,textarea{font-family:var(--font-read);letter-spacing:.01em;color:#262b36}
+.stem,.stem-pre,.md,.opt span,textarea{font-size:16px;line-height:1.85}
+.explain,.pt-explain,.pt-quick.block,.pts{font-size:15.5px;line-height:1.85}
+.md table,.rubric,.pt-quick.block table{font-size:15px;line-height:1.7}
+.md h1,.md h2,.md h3,.md h4{line-height:1.5;color:#1f2430}
+.md p{margin:.55em 0}
+.md li{margin:.25em 0}
+.plan li,.kprow>span:first-child{font-family:var(--font-read);font-size:15px}
+.btn,.tag,.label,.pts-head,.pt-rec,.pt-more,.split-head,th,summary,.verdict,.stat,.scorebig,.secthead,.qhead{font-family:var(--font-ui);letter-spacing:0}
+code,pre,kbd,.md pre,.md code{font-family:var(--font-mono);letter-spacing:0}
